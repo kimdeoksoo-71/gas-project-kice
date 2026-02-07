@@ -1,2 +1,2 @@
-# gas-project-kice
+# 평가원 기출 검색 및 AI 윤문 
 KICE2011~
