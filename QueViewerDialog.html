@@ -1,0 +1,239 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- MathJax -->
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true
+      },
+      options: { skipHtmlTags: ['script','noscript','style','textarea','pre','code'] }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+  <style>
+    :root { --bd:#e8e8e8; --bg:#fff; --muted: rgba(0,0,0,.65); }
+    html, body { height: 100%; margin: 0; overflow: hidden; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #fff; }
+
+    header {
+      height: 54px;
+      box-sizing: border-box;
+      position: sticky; top: 0; z-index: 10;
+      display: flex; gap: 10px; align-items: center;
+      padding: 10px 12px; border-bottom: 1px solid var(--bd); background: var(--bg);
+    }
+    .meta { font-size: 14px; color: rgba(0,0,0,.75); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .pill { padding: 3px 8px; border: 1px solid #eee; border-radius: 999px; font-size: 12px; color: rgba(0,0,0,.7); }
+    .spacer { flex: 1; }
+    button { border: 1px solid #ddd; background: #fff; padding: 6px 10px; border-radius: 10px; cursor: pointer; }
+    button:hover { background: #f7f7f7; }
+
+    .wrap {
+      height: calc(100vh - 54px);
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+    }
+
+    .pane {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      min-height: 0;
+      border-right: 1px solid var(--bd);
+    }
+    .pane:last-child { border-right: none; }
+
+    .paneHead {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--bd);
+      background: #fafafa;
+      display: flex; align-items: center; gap: 10px;
+      flex: 0 0 auto;
+    }
+    .paneTitle { font-weight: 650; }
+    .paneSub { font-size: 12px; color: var(--muted); }
+
+    .scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px; }
+
+    .list { border: 1px solid #e5e5e5; border-radius: 14px; background: #fff; overflow: hidden; }
+    .item { padding: 12px 12px; }
+    .item + .item { border-top: 1px dashed #eee; }
+
+    .itemHead { display:flex; gap:10px; align-items:baseline; margin-bottom: 8px; flex-wrap: wrap; }
+    .itemRow { font-size: 12px; opacity: .6; }
+    .itemId  { font-size: 12px; opacity: .85; font-weight: 650; }
+
+    /* 좌측: 상단/하단 분할 박스 */
+    .leftTop, .leftBottom {
+      border: 1px solid #eee;
+      border-radius: 12px;
+      padding: 12px;
+      line-height: 2.0;
+      font-size: 20px;
+      word-break: break-word;
+      background: #fff;
+    }
+    .leftBottom { margin-top: 10px; background: #fafafa; }
+
+    /* 우측: E(HTML) */
+    .rightBody {
+      border: 1px solid #eee;
+      border-radius: 12px;
+      padding: 12px;
+      line-height: 2.0;
+      font-size: 20px;
+      word-break: break-word;
+      background: #fff;
+    }
+
+    /* E 안의 링크(원본link) 기본 스타일 */
+    .rightBody a{
+      text-decoration: underline;
+      color: inherit;
+    }
+
+    .empty { padding: 14px; color: rgba(0,0,0,.6); }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="meta">
+      <span class="mono" id="sheet"></span>
+      <span class="pill" id="info" style="margin-left:8px; display:none;"></span>
+    </div>
+    <div class="spacer"></div>
+    <button onclick="poll(true)">새로고침</button>
+  </header>
+
+  <div class="wrap">
+    <!-- LEFT -->
+    <section class="pane">
+      <div class="paneHead">
+        <div class="paneTitle">Que 문항</div>
+        <div class="paneSub mono" id="leftSub"></div>
+      </div>
+      <div class="scroll">
+        <div id="leftList" class="list"></div>
+      </div>
+    </section>
+
+    <!-- RIGHT -->
+    <section class="pane">
+      <div class="paneHead">
+        <div class="paneTitle">수정 제안</div>
+        <div class="paneSub" id="rightSub"></div>
+      </div>
+      <div class="scroll">
+        <div id="rightList" class="list"></div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    let lastSig = '';
+
+    function escapeHtml(s) {
+      return String(s ?? '')
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;');
+    }
+
+    function typesetAll() {
+      const targets = [document.getElementById('leftList'), document.getElementById('rightList')];
+      if (window.MathJax && MathJax.typesetPromise) {
+        MathJax.typesetClear(targets);
+        MathJax.typesetPromise(targets).catch(console.error);
+      }
+    }
+
+    function render(payload) {
+      if (!payload) return;
+      const sig = payload.signature || '';
+      if (sig === lastSig) return;
+      lastSig = sig;
+
+      document.getElementById('sheet').textContent = payload.sheetName || 'Que';
+      const info = document.getElementById('info');
+      info.style.display = 'inline-block';
+      info.textContent = `범위 ${payload.range?.startRow ?? '?'}-${payload.range?.endRow ?? '?'} · ${payload.count ?? 0}개`;
+
+      document.getElementById('leftSub').textContent = 'A(id), B(latex) / D(finalfull)';
+      document.getElementById('rightSub').textContent = 'E(rewrittens)';
+
+      const items = payload.items || [];
+
+      if (!items.length) {
+        document.getElementById('leftList').innerHTML = `<div class="empty">(출력할 행이 없음: E가 "수정 구절 없음"인 행은 제외됨)</div>`;
+        document.getElementById('rightList').innerHTML = `<div class="empty">(출력할 행이 없음)</div>`;
+        return;
+      }
+
+      // LEFT: 각 행마다 상단(id+latex), 하단(finalfull)
+      const leftHtml = items.map(it => {
+        const idLine = escapeHtml(it.id || '(id 없음)');
+        const latex = escapeHtml(it.latex || '').replace(/\n/g,'<br>');
+        const full = escapeHtml(it.finalfull || '').replace(/\n/g,'<br>');
+        return `
+          <div class="item">
+            <div class="itemHead">
+              <span class="itemRow">row ${it.row}</span>
+              <span class="itemId">${idLine}</span>
+            </div>
+            <div class="leftTop">
+              <div><strong>${idLine}</strong></div>
+              <div>${latex || '(latex 빈값)'}</div>
+            </div>
+            <div class="leftBottom">
+              <div>${full || '(finalfull 빈값)'}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // RIGHT: E는 HTML이므로 그대로 innerHTML (원본link 포함)
+      const rightHtml = items.map(it => {
+        const idLine = escapeHtml(it.id || '(id 없음)');
+        return `
+          <div class="item">
+            <div class="itemHead">
+              <span class="itemRow">row ${it.row}</span>
+              <span class="itemId">${idLine}</span>
+            </div>
+            <div class="rightBody">${it.rewrittens_html || '(rewrittens 빈값)'}</div>
+          </div>
+        `;
+      }).join('');
+
+      document.getElementById('leftList').innerHTML = leftHtml;
+      document.getElementById('rightList').innerHTML = rightHtml;
+
+      typesetAll();
+    }
+
+    function poll(force=false) {
+      google.script.run
+        .withSuccessHandler((payload) => {
+          if (force) lastSig = '';
+          render(payload);
+        })
+        .qv_getPayload();
+    }
+
+    poll(true);
+    setInterval(() => poll(false), 700);
+  </script>
+</body>
+</html>

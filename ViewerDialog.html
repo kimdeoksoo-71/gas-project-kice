@@ -1,0 +1,247 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- MathJax -->
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true
+      },
+      options: { skipHtmlTags: ['script','noscript','style','textarea','pre','code'] }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+  <style>
+    :root { --bd:#e8e8e8; --bg:#fff; --muted: rgba(0,0,0,.65); }
+    html, body { height: 100%; margin: 0; overflow: hidden; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #fff; }
+
+    header {
+      height: 54px;
+      box-sizing: border-box;
+      position: sticky; top: 0; z-index: 10;
+      display: flex; gap: 10px; align-items: center;
+      padding: 10px 12px; border-bottom: 1px solid var(--bd); background: var(--bg);
+    }
+    .meta { font-size: 14px; color: rgba(0,0,0,.75); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .pill { padding: 3px 8px; border: 1px solid #eee; border-radius: 999px; font-size: 12px; color: rgba(0,0,0,.7); }
+    .spacer { flex: 1; }
+    button { border: 1px solid #ddd; background: #fff; padding: 6px 10px; border-radius: 10px; cursor: pointer; }
+    button:hover { background: #f7f7f7; }
+
+    .wrap {
+      height: calc(100vh - 54px);
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+    }
+
+    .pane {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      min-height: 0;
+      border-right: 1px solid var(--bd);
+    }
+    .pane:last-child { border-right: none; }
+
+    .paneHead {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--bd);
+      background: #fafafa;
+      display: flex; align-items: center; gap: 10px;
+      flex: 0 0 auto;
+    }
+    .paneTitle { font-weight: 650; }
+    .paneSub { font-size: 12px; color: var(--muted); }
+
+    .scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px; }
+
+    .box, .list {
+      border: 1px solid #e5e5e5; border-radius: 14px;
+      padding: 14px;
+      line-height: 2.0;
+      font-size: 20px;
+      word-break: break-word;
+      background: #fff;
+    }
+
+    .list { padding: 0; }
+    .item { padding: 12px 12px; }
+    .item + .item { border-top: 1px dashed #eee; }
+    .itemHead { display:flex; gap:10px; align-items:baseline; margin-bottom: 6px; flex-wrap: wrap; }
+    .itemA1 { font-size: 12px; opacity: .75; }
+    .itemRow { font-size: 12px; opacity: .5; }
+    .itemSrc { font-size: 12px; opacity: .5; }
+
+    /* ✅ 원본link */
+    .itemLink a{
+      font-size: 12px;
+      opacity: .8;
+      text-decoration: underline;
+      color: inherit;
+    }
+
+    .raw {
+      margin-top: 10px; padding: 12px; border-radius: 12px;
+      background: #fafafa; border: 1px solid #eee; white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      display:none;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="meta">
+      <span class="mono" id="sheet"></span>
+      <span class="pill" id="rightInfo" style="margin-left:8px; display:none;"></span>
+    </div>
+    <div class="spacer"></div>
+    <button onclick="toggleRaw()">원문 보기/숨기기</button>
+    <button onclick="poll(true)">새로고침</button>
+  </header>
+
+  <div class="wrap">
+    <!-- LEFT -->
+    <section class="pane">
+      <div class="paneHead">
+        <div class="paneTitle">검토 문항</div>
+        <div class="paneSub mono" id="leftA1">B2</div>
+      </div>
+      <div class="scroll">
+        <div id="leftContent" class="box"></div>
+        <div id="leftRaw" class="raw"></div>
+      </div>
+    </section>
+
+    <!-- RIGHT -->
+    <section class="pane">
+      <div class="paneHead">
+        <div class="paneTitle">결과</div>
+        <div class="paneSub" id="rightSub"></div>
+      </div>
+      <div class="scroll">
+        <div id="rightContent" class="list"></div>
+        <div id="rightRaw" class="raw"></div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    let lastSig = '';
+    let showRaw = false;
+
+    function escapeHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // ✅ source가 20자 초과일 때만 말줄임
+    function ellipsis20(s) {
+      s = String(s ?? '');
+      return (s.length > 20) ? (s.slice(0, 20) + '...') : s;
+    }
+
+    // ✅ 링크 안전 처리(최소한)
+    function safeUrl(u){
+      u = String(u ?? '').trim();
+      if (!u) return '';
+      // http/https만 허용(드라이브 링크도 보통 https)
+      if (!/^https?:\/\//i.test(u)) return '';
+      return u;
+    }
+
+    function toggleRaw() {
+      showRaw = !showRaw;
+      document.getElementById('leftRaw').style.display = showRaw ? 'block' : 'none';
+      document.getElementById('rightRaw').style.display = showRaw ? 'block' : 'none';
+    }
+
+    function renderLeft(left) {
+      document.getElementById('sheet').textContent = left.sheetName;
+      document.getElementById('leftA1').textContent = left.a1;
+
+      const html = escapeHtml(left.text).replace(/\n/g, '<br>');
+      document.getElementById('leftContent').innerHTML = html || '(빈 내용)';
+      document.getElementById('leftRaw').textContent = `[${left.a1}]\n${left.text}`;
+    }
+
+    function renderRight(right) {
+      const info = document.getElementById('rightInfo');
+      info.style.display = 'inline-block';
+      info.textContent = `열 ${right.col} · ${right.count}개`;
+
+      document.getElementById('rightSub').textContent = `선택된 셀을 위→아래로 표시 (우측만 스크롤)`;
+
+      const html = (right.items || []).map(it => {
+        const body = escapeHtml(it.text).replace(/\n/g, '<br>');
+        const src = escapeHtml(ellipsis20(it.source || ''));
+
+        const url = safeUrl(it.origLink);
+        const linkHtml = url
+          ? `<span class="itemLink"><a href="${escapeHtml(url)}" target="_blank" rel="noopener">원본link</a></span>`
+          : '';
+
+        return `
+          <div class="item">
+            <div class="itemHead">
+              <span class="mono itemA1">${escapeHtml(it.a1)}</span>
+              <span class="itemRow">row ${it.row}</span>
+              <span class="itemSrc">${src}</span>
+              ${linkHtml}
+            </div>
+            <div class="itemBody">${body}</div>
+          </div>
+        `;
+      }).join('');
+
+      document.getElementById('rightContent').innerHTML =
+        html || '<div class="item">(선택된 내용 없음)</div>';
+
+      // raw에는 원본 그대로 표시(말줄임 없음) + 링크도 같이
+      document.getElementById('rightRaw').textContent =
+        (right.items || []).map(it =>
+          `[${it.a1}] [A${it.row}:${it.source ?? ''}] [C${it.row}:${it.origLink ?? ''}]\n${it.text}`
+        ).join('\n\n-----\n\n');
+    }
+
+    function typesetAll() {
+      const targets = [document.getElementById('leftContent'), document.getElementById('rightContent')];
+      if (window.MathJax && MathJax.typesetPromise) {
+        MathJax.typesetClear(targets);
+        MathJax.typesetPromise(targets).catch(console.error);
+      }
+    }
+
+    function apply(payload, force=false) {
+      if (!payload) return;
+      const sig = payload.signature || '';
+      if (!force && sig === lastSig) return;
+      lastSig = sig;
+
+      renderLeft(payload.left);
+      renderRight(payload.right);
+      typesetAll();
+    }
+
+    function poll(force=false) {
+      google.script.run
+        .withSuccessHandler((payload) => apply(payload, force))
+        .lv_getComparePayload();
+    }
+
+    poll(true);
+    setInterval(() => poll(false), 700);
+  </script>
+</body>
+</html>
