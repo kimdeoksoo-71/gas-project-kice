@@ -19,7 +19,6 @@ function onOpen() {
   menu.addSeparator();
   menu.addItem('🧵 Que 자동윤문 시작', 'batch_startQueAuto')
   menu.addItem('⛔ Que 자동윤문 중지', 'batch_stopQueAuto')
-  menu.addItem('한 문항 윤문 제안', 'review_rewriteToKiceStyle_gpt52');
   
   // ---- 검색어로 문항 나열하여 Latex 변환 ----
   menu.addSeparator();
