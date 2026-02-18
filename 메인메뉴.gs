@@ -1,6 +1,6 @@
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
-  const menu = ui.createMenu('🍋 사용자도구');
+  const menu = ui.createMenu('🍋 앱 메뉴');
 
   // ---- 기타 도구 ----
   menu.addItem('뷰어 : 원본과 비교', 'lv_openDialog');
@@ -19,11 +19,6 @@ function onOpen() {
   menu.addItem('⏹️ Que 자동윤문 중지', 'batch_stopQueAuto');
   menu.addSeparator
   menu.addItem('현재 프롬프트를 github에 push', 'pushIndividualPromptsToGithub')
-  
-  // ---- 검색어로 문항 나열하여 Latex 변환 ----
-  menu.addSeparator();
-  menu.addItem('검색어로 문항나열', 'runSearchAndAppend');
-  menu.addItem('행 범위 입력 → Latex 변환', 'mpb_runRange');
   
   // ---- Token 테이블 ----
   menu.addSeparator();

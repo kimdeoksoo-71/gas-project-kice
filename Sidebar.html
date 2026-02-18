@@ -3,99 +3,111 @@
   <head>
     <base target="_top">
     <meta charset="UTF-8" />
-
-    <!-- MathJax 설정 (TeX, $...$, $$...$$ 지원) -->
     <script>
       window.MathJax = {
         tex: {
           inlineMath: [['$', '$'], ['$$', '$$'], ['\\(', '\\)'], ['\(', '\)']]
         },
-        svg: {
-          fontCache: 'global'
-        }
+        svg: { fontCache: 'global' }
       };
     </script>
-    <!-- MathJax v3 CDN -->
     <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
 
     <style>
       body {
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-family: system-ui, -apple-system, sans-serif;
         font-size: 14px;
-        padding: 2px 2px 2px;
-        line-height: 1.8;
-        zoom: 1.2;           /* 1.2배 확대 — 1.0~1.5 사이로 조정 가능 */
-        overflow-x: auto;    /* 가로 스크롤 허용 (내용이 넘칠 때) */
+        padding: 10px;
+        line-height: 1.6;
+        background-color: #f8f9fa;
       }
-      
       #meta {
         font-size: 11px;
-        color: #666;
-        margin-bottom: 8px;
+        color: #1a73e8;
+        font-weight: bold;
+        margin-bottom: 10px;
+        position: sticky;
+        top: 0;
+        background: #f8f9fa;
+        padding: 5px 0;
       }
-      #contentBox {
+      .cell-item {
+        background: #fff;
         border: 1px solid #ddd;
         border-radius: 6px;
-        padding: 10px;
-        min-height: 120px;
+        padding: 12px;
+        margin-bottom: 15px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      }
+      .cell-address {
+        font-size: 10px;
+        color: #888;
+        border-bottom: 1px dashed #eee;
+        margin-bottom: 8px;
+        display: block;
+      }
+      .cell-content {
         white-space: normal;
         word-break: break-word;
-        background: #fff;
       }
-      #loading {
-        color: #999;
+      hr {
+        border: 0;
+        height: 1px;
+        background: #e0e0e0;
+        margin: 20px 0;
       }
+      #loading { color: #999; text-align: center; display: block; margin-top: 20px; }
     </style>
   </head>
   <body>
-    <div id="meta">활성 셀 내용 미리보기</div>
-    <div id="contentBox">
-      <span id="loading">가져오는 중...</span>
+    <div id="meta">선택 범위 미리보기</div>
+    <div id="container">
+      <span id="loading">데이터를 불러오는 중...</span>
     </div>
 
     <script>
-      /**
-       * 셀 내용을 사이드바에 표시하고 MathJax로 다시 렌더링
-       */
-      function renderCell(obj) {
-        var box = document.getElementById('contentBox');
-        var loading = document.getElementById('loading');
-        if (loading) loading.remove();
+      let lastRange = "";
 
-        // 셀 내용
-        var text = obj && obj.value ? obj.value : '';
+      function renderRange(res) {
+        const container = document.getElementById('container');
+        
+        // 선택 범위가 이전과 같고 내용도 같다면 굳이 다시 그리지 않음 (깜빡임 방지)
+        const currentRange = res.sheetName + "!" + res.rangeAddress;
+        
+        // 컨텐츠 생성
+        let htmlBuffer = "";
+        res.contents.forEach((item, index) => {
+          htmlBuffer += `
+            <div class="cell-item">
+              <span class="cell-address">${item.address}</span>
+              <div class="cell-content">
+                ${item.value.replace(/\n/g, '<br>') || '<span style="color:#ccc">빈 셀</span>'}
+              </div>
+            </div>
+          `;
+          // 마지막 셀이 아니면 가로 바 추가
+          if (index < res.contents.length - 1) {
+            htmlBuffer += '<hr>';
+          }
+        });
 
-        // 줄바꿈을 <br>로 바꿔서 보여주기
-        // 여기서 text는 그대로 innerHTML에 넣어 MathJax가 $...$를 읽도록 한다
-        var html = text.replace(/\n/g, '<br>');
+        container.innerHTML = htmlBuffer;
 
-        box.innerHTML = html || '<span style="color:#999">빈 셀입니다.</span>';
-
-        // MathJax 다시 렌더링
+        // MathJax 렌더링
         if (window.MathJax && window.MathJax.typesetPromise) {
-          window.MathJax.typesetPromise([box]).catch(function (err) {
-            console.error(err);
-          });
+          window.MathJax.typesetPromise([container]).catch(err => console.error(err));
         }
       }
 
-      /**
-       * 서버(Apps Script)에서 현재 활성 셀 데이터 받아오기
-       */
-      function fetchActiveCell() {
+      function fetchData() {
         google.script.run
-          .withSuccessHandler(function (res) {
-            renderCell(res);
-          })
-          .getActiveCellContent();
+          .withSuccessHandler(renderRange)
+          .getActiveRangeContents();
       }
 
-      // 처음 한번 불러오기
-      fetchActiveCell();
-
-      // 1.5초마다 한 번씩 현재 셀 내용 다시 가져오기
-      // (너무 짧게 하면 호출이 많아지니 1500~2000ms 정도가 적당)
-      setInterval(fetchActiveCell, 1500);
+      // 초기 실행 및 주기적 갱신
+      fetchData();
+      setInterval(fetchData, 2000); // 범위를 많이 잡을 수 있으므로 주기를 약간 늘림(2초)
     </script>
   </body>
 </html>

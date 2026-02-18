@@ -3,22 +3,35 @@
  */
 function showCellPreviewSidebar() {
   const html = HtmlService.createHtmlOutputFromFile('Sidebar')
-    .setTitle('셀 미리보기');
+    .setTitle('선택 영역 미리보기')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   SpreadsheetApp.getUi().showSidebar(html);
 }
 
 /**
- * 현재 활성 시트의 활성 셀 내용을 가져오는 함수
- * 사이드바에서 주기적으로 이걸 호출해서 새 내용을 받아감
+ * 선택된 모든 셀의 내용을 배열로 가져오는 함수
  */
-function getActiveCellContent() {
+function getActiveRangeContents() {
   const sheet = SpreadsheetApp.getActiveSheet();
-  const cell = sheet.getActiveCell();
-  // 표시되는 값으로 가져오는 편이 자연스러움
-  const value = cell.getDisplayValue();
+  const range = sheet.getActiveRange();
+  const values = range.getDisplayValues(); // 화면에 보이는 값 그대로 가져옴
+  const startRow = range.getRow();
+  const startCol = range.getColumn();
+  
+  let contents = [];
+  
+  for (let r = 0; r < values.length; r++) {
+    for (let c = 0; c < values[r].length; c++) {
+      contents.push({
+        value: values[r][c] || '',
+        address: sheet.getRange(startRow + r, startCol + c).getA1Notation()
+      });
+    }
+  }
+  
   return {
-    value: value || '',
+    contents: contents,
     sheetName: sheet.getName(),
-    address: cell.getA1Notation()
+    rangeAddress: range.getA1Notation()
   };
 }
