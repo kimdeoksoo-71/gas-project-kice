@@ -1,35 +1,31 @@
 /*************************************************
- * Que 결과 뷰어 (Dialog)
- * - 사용자 입력: 시작행/마지막행
- * - Que(A:id,B:latex,C:chapter,D:finalfull,E:rewrittens)
- * - E가 "수정 구절 없음"인 행은 제외
- * - 좌: (상단) id+latex  / (하단) finalfull
- * - 우: rewrittens(HTML 그대로 innerHTML 렌더)
+ * 아카이브 결과 뷰어 (Dialog)
+ * - 사용자 입력: 시작행-마지막행
+ * - 아카이브(A:id, B:Latex, C:chapter, D:claude, E:gpt, F:gemini)
+ * - 좌: B(Latex)
+ * - 우: D(Claude), E(GPT), F(Gemini) 순차 표시
  *************************************************/
 
 const QV = (function () {
-  const TITLE = 'Que Viewer';
-  const SHEET = 'Que';
-
-  // 사용자별 상태 저장 키
+  const TITLE = '아카이브 Viewer';
+  const SHEET = '아카이브';
   const KEY = 'QV_RANGE_V1';
 
   function openDialog() {
     const ss = SpreadsheetApp.getActive();
     const ui = SpreadsheetApp.getUi();
 
-    // 1) Alert(=prompt)로 시작행/마지막행 받기
     const resp = ui.prompt(
-      'Que 결과 보기',
-      '시작행,마지막행을 입력해줘 (예: 2,50)',
+      '아카이브 결과 보기',
+      '시작행-마지막행을 입력해줘 (예: 2-50)',
       ui.ButtonSet.OK_CANCEL
     );
     if (resp.getSelectedButton() !== ui.Button.OK) return;
 
     const txt = String(resp.getResponseText() || '').trim();
-    const m = txt.match(/^(\d+)\s*,\s*(\d+)$/);
+    const m = txt.match(/^(\d+)\s*-\s*(\d+)$/);
     if (!m) {
-      ss.toast('입력 형식 오류: "시작행,마지막행" 예) 2,50', '안내', 5);
+      ss.toast('입력 형식 오류: "시작행-마지막행" 예) 2-50', '안내', 5);
       return;
     }
 
@@ -41,7 +37,6 @@ const QV = (function () {
     startRow = Math.max(2, Math.floor(startRow));
     endRow = Math.max(startRow, Math.floor(endRow));
 
-    // 상태 저장(사용자별)
     PropertiesService.getUserProperties().setProperty(KEY, JSON.stringify({
       sheet: SHEET,
       startRow,
@@ -49,8 +44,7 @@ const QV = (function () {
       t: Date.now()
     }));
 
-    // 2) Dialog 오픈
-    const html = HtmlService.createHtmlOutputFromFile('QueViewerDialog')
+    const html = HtmlService.createHtmlOutputFromFile('ArchiveViewer')
       .setTitle(TITLE)
       .setWidth(1200)
       .setHeight(1400);
@@ -82,32 +76,34 @@ const QV = (function () {
     const h = Math.max(0, endRow - startRow + 1);
     if (h <= 0) return { signature: 'empty_range', sheetName: sh.getName(), items: [] };
 
-    // A~E 읽기
-    const vals = sh.getRange(startRow, 1, h, 5).getValues();
+    // A~F 읽기 (6열)
+    const vals = sh.getRange(startRow, 1, h, 6).getValues();
 
     const items = [];
     for (let i = 0; i < vals.length; i++) {
       const row = startRow + i;
       const id = String(vals[i][0] ?? '').trim();
       const latex = String(vals[i][1] ?? '').trim();
-      const finalfull = String(vals[i][3] ?? '').trim();
-      const rew = String(vals[i][4] ?? '').trim();
+      const claude = String(vals[i][3] ?? '').trim();
+      const gpt = String(vals[i][4] ?? '').trim();
+      const gemini = String(vals[i][5] ?? '').trim();
 
-      // 2) E가 "수정 구절 없음"이면 제외
-      if (!rew || rew === '수정 구절 없음') continue;
+      // D,E,F 모두 비어있으면 제외
+      if (!claude && !gpt && !gemini) continue;
 
       items.push({
         row,
         id,
         latex,
-        finalfull,
-        rewrittens_html: rew
+        claude,
+        gpt,
+        gemini
       });
     }
 
     const signature =
       `${sh.getName()}|${startRow}-${endRow}|cnt:${items.length}|t:${st.t}|` +
-      items.map(it => `${it.row}:${it.rewrittens_html.length}`).join(',');
+      items.map(it => `${it.row}:${it.claude.length}:${it.gpt.length}:${it.gemini.length}`).join(',');
 
     return {
       signature,

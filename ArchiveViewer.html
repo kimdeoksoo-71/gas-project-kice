@@ -72,10 +72,10 @@
 
     .itemHead { display:flex; gap:10px; align-items:baseline; margin-bottom: 8px; flex-wrap: wrap; }
     .itemRow { font-size: 12px; opacity: .6; }
-    .itemId  { font-size: 12px; opacity: .85; font-weight: 650; }
+    .itemId  { font-size: 20px; font-weight: 700; opacity: .85; }
 
-    /* 좌측: 상단/하단 분할 박스 */
-    .leftTop, .leftBottom {
+    /* 좌측: Latex 박스 */
+    .leftTop {
       border: 1px solid #eee;
       border-radius: 12px;
       padding: 12px;
@@ -84,9 +84,8 @@
       word-break: break-word;
       background: #fff;
     }
-    .leftBottom { margin-top: 10px; background: #fafafa; }
 
-    /* 우측: E(HTML) */
+    /* 우측: LLM 결과 박스 */
     .rightBody {
       border: 1px solid #eee;
       border-radius: 12px;
@@ -96,9 +95,22 @@
       word-break: break-word;
       background: #fff;
     }
+    .rightBody + .rightBody { margin-top: 10px; }
 
-    /* E 안의 링크(원본link) 기본 스타일 */
-    .rightBody a{
+    .llmLabel {
+      display: inline-block;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 2px 10px;
+      border-radius: 6px;
+      margin-bottom: 8px;
+      color: #fff;
+    }
+    .llmLabel.claude { background: #d97706; }
+    .llmLabel.gpt    { background: #10a37f; }
+    .llmLabel.gemini  { background: #4285f4; }
+
+    .rightBody a {
       text-decoration: underline;
       color: inherit;
     }
@@ -121,7 +133,7 @@
     <!-- LEFT -->
     <section class="pane">
       <div class="paneHead">
-        <div class="paneTitle">Que 문항</div>
+        <div class="paneTitle">문항 (Latex)</div>
         <div class="paneSub mono" id="leftSub"></div>
       </div>
       <div class="scroll">
@@ -132,7 +144,7 @@
     <!-- RIGHT -->
     <section class="pane">
       <div class="paneHead">
-        <div class="paneTitle">수정 제안</div>
+        <div class="paneTitle">윤문 결과</div>
         <div class="paneSub" id="rightSub"></div>
       </div>
       <div class="scroll">
@@ -159,33 +171,42 @@
       }
     }
 
+    function renderLlmBlock(label, cssClass, html) {
+      if (!html) return '';
+      return `
+        <div class="rightBody">
+          <div><span class="llmLabel ${cssClass}">${label}</span></div>
+          <div>${html}</div>
+        </div>
+      `;
+    }
+
     function render(payload) {
       if (!payload) return;
       const sig = payload.signature || '';
       if (sig === lastSig) return;
       lastSig = sig;
 
-      document.getElementById('sheet').textContent = payload.sheetName || 'Que';
+      document.getElementById('sheet').textContent = payload.sheetName || '아카이브';
       const info = document.getElementById('info');
       info.style.display = 'inline-block';
       info.textContent = `범위 ${payload.range?.startRow ?? '?'}-${payload.range?.endRow ?? '?'} · ${payload.count ?? 0}개`;
 
-      document.getElementById('leftSub').textContent = 'A(id), B(latex) / D(finalfull)';
-      document.getElementById('rightSub').textContent = 'E(rewrittens)';
+      document.getElementById('leftSub').textContent = 'A(id), B(Latex)';
+      document.getElementById('rightSub').textContent = 'D(Claude) / E(GPT) / F(Gemini)';
 
       const items = payload.items || [];
 
       if (!items.length) {
-        document.getElementById('leftList').innerHTML = `<div class="empty">(출력할 행이 없음: E가 "수정 구절 없음"인 행은 제외됨)</div>`;
+        document.getElementById('leftList').innerHTML = `<div class="empty">(출력할 행이 없음)</div>`;
         document.getElementById('rightList').innerHTML = `<div class="empty">(출력할 행이 없음)</div>`;
         return;
       }
 
-      // LEFT: 각 행마다 상단(id+latex), 하단(finalfull)
+      // LEFT: id 헤더 + Latex만 (id 중복 제거)
       const leftHtml = items.map(it => {
         const idLine = escapeHtml(it.id || '(id 없음)');
         const latex = escapeHtml(it.latex || '').replace(/\n/g,'<br>');
-        const full = escapeHtml(it.finalfull || '').replace(/\n/g,'<br>');
         return `
           <div class="item">
             <div class="itemHead">
@@ -193,26 +214,27 @@
               <span class="itemId">${idLine}</span>
             </div>
             <div class="leftTop">
-              <div><strong>${idLine}</strong></div>
-              <div>${latex || '(latex 빈값)'}</div>
-            </div>
-            <div class="leftBottom">
-              <div>${full || '(finalfull 빈값)'}</div>
+              <div>${latex || '(Latex 빈값)'}</div>
             </div>
           </div>
         `;
       }).join('');
 
-      // RIGHT: E는 HTML이므로 그대로 innerHTML (원본link 포함)
+      // RIGHT: Claude, GPT, Gemini 순차
       const rightHtml = items.map(it => {
         const idLine = escapeHtml(it.id || '(id 없음)');
+        const blocks = [
+          renderLlmBlock('Claude', 'claude', it.claude),
+          renderLlmBlock('GPT', 'gpt', it.gpt),
+          renderLlmBlock('Gemini', 'gemini', it.gemini)
+        ].join('');
         return `
           <div class="item">
             <div class="itemHead">
               <span class="itemRow">row ${it.row}</span>
               <span class="itemId">${idLine}</span>
             </div>
-            <div class="rightBody">${it.rewrittens_html || '(rewrittens 빈값)'}</div>
+            ${blocks || '<div class="rightBody">(윤문 결과 없음)</div>'}
           </div>
         `;
       }).join('');

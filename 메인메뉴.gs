@@ -3,10 +3,9 @@ function onOpen() {
   const menu = ui.createMenu('🍋 앱 메뉴');
 
   // ---- 기타 도구 ----
-  menu.addItem('뷰어 : 원본과 비교', 'lv_openDialog');
-  menu.addItem('뷰어 : 키워드검색 결과', 'sv_openSearchViewer');
-  menu.addItem('사이드바','showCellPreviewSidebar');
-  menu.addItem('📂 Que 결과 뷰어', 'qv_openDialog');
+  menu.addItem('키워드검색 결과', 'sv_openSearchViewer');
+  menu.addItem('➡️ 사이드바 뷰어','showCellPreviewSidebar');
+  menu.addItem('🅰️ 아카이브 뷰어', 'qv_openDialog');
 
   // ---- 유사문항 검색과 문항별 윤문 ----
   menu.addSeparator();
@@ -17,8 +16,8 @@ function onOpen() {
   menu.addSeparator();
   menu.addItem('▶️ Que 자동윤문 시작', 'batch_startQueAuto');
   menu.addItem('⏹️ Que 자동윤문 중지', 'batch_stopQueAuto');
-  menu.addSeparator
-  menu.addItem('현재 프롬프트를 github에 push', 'pushIndividualPromptsToGithub')
+  menu.addSeparator();
+  menu.addItem('✅ 현재 프롬프트를 github에 push', 'pushIndividualPromptsToGithub');
   
   // ---- Token 테이블 ----
   menu.addSeparator();

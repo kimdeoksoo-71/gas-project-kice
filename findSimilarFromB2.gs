@@ -1,503 +1,515 @@
 /*****************************************************
- * Find Similar (TF-IDF + Cosine, TEXT/MATH 분리)
- * + Token_Stat의 PATTERN/FORM 적극 반영
- * + (복구) C2 대단원 필터: C2에 값이 있으면 같은 chapter만 검색
+ * Find Similar (TF-IDF + Cosine)
  *
- * Input (현재 시트):
- *  - B2: query latex(본문+수식)
- *  - C2: query chapter (대단원)  ✅ 있으면 필터
- *  - E2: topN (1~50, 비어있으면 DEFAULT_TOP_N)
- *  - F2: text weight
- *  - G2: math weight
+ * ▸ Token_Stat의 TEXT/MATH/PATTERN/FORM 가중치를 활용
+ * ▸ C2 대단원 필터: 값이 있으면 같은 chapter만 검색
  *
- * Output 보호:
- *  - A5:E20까지만 사용(21행 이하 보호)
+ * Input (문항검토 시트):
+ *  B2: query latex (본문+수식)
+ *  C2: chapter (대단원, 비우면 전체 검색)
+ *  E2: topN (기본 10)
+ *  F2: text weight (기본 0.7)
+ *  G2: math weight (기본 0.3)
+ *
+ * Output:
+ *  A5:E20 (21행 이하 보호)
  *****************************************************/
 
-const DEFAULT_TOP_N   = 10;
-const DEFAULT_W_TEXT  = 0.7;
-const DEFAULT_W_MATH  = 0.3;
 
-const OUTPUT_HEADER_ROW = 5;
-const OUTPUT_START_ROW  = 6;
-const OUTPUT_LAST_ROW   = 20;   // 21행 이하 보호
-const OUTPUT_LATEX_COL  = 4;
+/* =========================================================
+ * 상수
+ * ========================================================= */
+
+const FS_DEFAULT_TOP_N  = 10;
+const FS_DEFAULT_W_TEXT = 0.7;
+const FS_DEFAULT_W_MATH = 0.3;
+
+const FS_HEADER_ROW = 5;
+const FS_START_ROW  = 6;
+const FS_LAST_ROW   = 20;   // 21행 이하 보호
+const FS_LATEX_COL  = 4;    // D열
+
+// composite 토큰의 가상 idf 배율
+const FS_VIRTUAL_IDF_BOOST = 1.1;
+
+// ── 공용 Stopword (빌드와 검색에서 동일하게 사용) ──
+const FS_STOP_TEXT = new Set([
+  '다음','다음은','각','모든','서로','대하여','하여','한다','이다','인',
+  '에서','의','을','를','은','는','이','가',
+  '그리고','또는','혹은','또','또한','때','경우','조건','만족','성립',
+  '하여라','구하여라','구하라',
+  '값','최댓값','최소값','최솟값','정답','보기','중','중에서',
+  '실수','정수','자연수','양수','음수','유리수','무리수',
+  '함수','수열','항','점','선분','직선','원','삼각형','사각형','다각형',
+  '좌표','평면','구간','범위',
+  '일때','일때의','이라','이라면','이고','이며','라고','라할','라하면'
+]);
+
+const FS_STOP_MATH = new Set(['\\|', '*', '/', '.', ',', ':', ';']);
+
+
+/* =========================================================
+ * 메인 함수
+ * ========================================================= */
 
 function findSimilarFromB2(options) {
   options = options || {};
-  const openViewer = (options.openViewer !== false); // 기본 true
 
-  const ss = SpreadsheetApp.getActive();
-  const sheet = ss.getActiveSheet();
-
-  const dataSheet = ss.getSheetByName('Data_Latex');
-  const statSheet = ss.getSheetByName('Token_Stat');
+  var ss = SpreadsheetApp.getActive();
+  var sheet = ss.getActiveSheet();
+  var dataSheet = ss.getSheetByName('Data_Latex');
+  var statSheet = ss.getSheetByName('Token_Stat');
 
   if (!dataSheet || !statSheet) {
     ss.toast('Data_Latex 또는 Token_Stat 시트를 찾을 수 없습니다.', '오류', 5);
     return;
   }
 
-  // 1) 입력
-  const query = String(sheet.getRange('B2').getDisplayValue() || '').trim();
+  // ── 입력 ──
+  var query = String(sheet.getRange('B2').getDisplayValue() || '').trim();
   if (!query) {
     ss.toast('B2 셀에 비교할 문항을 입력하세요.', '안내', 5);
     return;
   }
 
-  // ✅ (복구) C2 대단원 필터
-  const queryChapter = String(sheet.getRange('C2').getDisplayValue() || '').trim();
-  const useChapterFilter = !!queryChapter;
+  var queryChapter = String(sheet.getRange('C2').getDisplayValue() || '').trim();
+  var useChapterFilter = !!queryChapter;
 
-  // 출력 가능 최대 개수(6~20행 => 15개)
-  const maxOutput = OUTPUT_LAST_ROW - OUTPUT_START_ROW + 1;
-
-  const wantN = FS_clampInt_(sheet.getRange('E2').getValue(), 1, 50, DEFAULT_TOP_N);
-  const topNCount = Math.min(wantN, maxOutput);
-
-  const { wText, wMath } = FS_readWeightsFG_(sheet); // F2/G2
-
-  // 2) Token_Stat 로드 (PATTERN->TEXT, FORM->MATH)
-  const { idfText, idfMath } = FS_loadIdfMaps_(statSheet);
-
-  // 3) Query 벡터
-  const qTokens = FS_extractTokensFromLatex_(query);
-
-  const qTextTokens = FS_filterStopText_(
-    (qTokens.textTokens || []).concat(qTokens.patternTokens || [])
-  );
-  const qMathTokens = FS_filterNoiseMath_(
-    (qTokens.mathTokens || []).concat(qTokens.formTokens || [])
+  var maxOutput = FS_LAST_ROW - FS_START_ROW + 1;  // 15
+  var topNCount = Math.min(
+    _clampInt_(sheet.getRange('E2').getValue(), 1, maxOutput, FS_DEFAULT_TOP_N),
+    maxOutput
   );
 
-  const qTextVec = FS_buildTfidfVector_(qTextTokens, idfText);
-  const qMathVec = FS_buildTfidfVectorWithMathExtras_(qTokens.mathRawList, qMathTokens, idfMath);
+  var weights = _readWeights_(sheet);
 
-  const qTextNorm = FS_vecNorm_(qTextVec);
-  const qMathNorm = FS_vecNorm_(qMathVec);
+  // ── Token_Stat 로드 ──
+  var idfMaps = _loadIdfMaps_(statSheet);
 
-  // 4) Data scan
-  const data = dataSheet.getDataRange().getValues();
-  const scored = [];
+  // ── Query 벡터 ──
+  var qTokens    = _extractTokens_(query);
+  var qTextToks  = _filterStopText_(qTokens.textTokens.concat(qTokens.patternTokens));
+  var qMathToks  = _filterStopMath_(qTokens.mathTokens.concat(qTokens.formTokens));
+  var qTextVec   = _buildTfidfVec_(qTextToks, idfMaps.text);
+  var qMathVec   = _buildMathVec_(qTokens.mathRawList, qMathToks, idfMaps.math);
+  var qTextNorm  = _vecNorm_(qTextVec);
+  var qMathNorm  = _vecNorm_(qMathVec);
 
-  for (let i = 1; i < data.length; i++) { // 2행부터
-    const row = data[i];
-    const source    = row[8]; // I
-    const chapter   = String(row[9] ?? '').trim(); // J
-    const driveLink = row[1]; // B
-    const latex     = row[2]; // C
+  // ── Data 스캔 ──
+  var data = dataSheet.getDataRange().getValues();
+  var scored = [];
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var latex   = row[2];  // C
     if (!latex) continue;
 
-    // ✅ (복구) 대단원 필터: C2가 비어있지 않으면 같은 chapter만
+    var chapter = String(row[9] || '').trim();  // J
     if (useChapterFilter && chapter !== queryChapter) continue;
 
-    const dTokens = FS_extractTokensFromLatex_(latex);
+    var dTokens   = _extractTokens_(latex);
+    var dTextToks = _filterStopText_(dTokens.textTokens.concat(dTokens.patternTokens));
+    var dMathToks = _filterStopMath_(dTokens.mathTokens.concat(dTokens.formTokens));
+    var dTextVec  = _buildTfidfVec_(dTextToks, idfMaps.text);
+    var dMathVec  = _buildMathVec_(dTokens.mathRawList, dMathToks, idfMaps.math);
 
-    const dTextTokens = FS_filterStopText_(
-      (dTokens.textTokens || []).concat(dTokens.patternTokens || [])
-    );
-    const dMathTokens = FS_filterNoiseMath_(
-      (dTokens.mathTokens || []).concat(dTokens.formTokens || [])
-    );
+    var textScore = _cosine_(qTextVec, qTextNorm, dTextVec);
+    var mathScore = _cosine_(qMathVec, qMathNorm, dMathVec);
+    var score = weights.wText * textScore + weights.wMath * mathScore;
 
-    const dTextVec = FS_buildTfidfVector_(dTextTokens, idfText);
-    const dMathVec = FS_buildTfidfVectorWithMathExtras_(dTokens.mathRawList, dMathTokens, idfMath);
-
-    const textScore = FS_cosine_(qTextVec, qTextNorm, dTextVec);
-    const mathScore = FS_cosine_(qMathVec, qMathNorm, dMathVec);
-
-    const score = wText * textScore + wMath * mathScore;
-    if (score > 0) scored.push({ score, source, chapter, driveLink, latex, rowIndex: i + 1 });
+    if (score > 0) {
+      scored.push({
+        score: score,
+        source: row[8],     // I
+        chapter: chapter,
+        driveLink: row[1],  // B
+        latex: latex,
+        rowIndex: i + 1
+      });
+    }
   }
 
-  // 5) 정렬 + 상위 N
-  scored.sort((a, b) => b.score - a.score || a.rowIndex - b.rowIndex);
-  const topN = scored.slice(0, topNCount);
+  // ── 정렬 + 출력 ──
+  scored.sort(function(a, b) { return b.score - a.score || a.rowIndex - b.rowIndex; });
+  var topN = scored.slice(0, topNCount);
+  topN.sort(function(a, b) { return String(b.source).localeCompare(String(a.source)); });
 
-  // source 기준 내림차순(유지)
-  topN.sort((a, b) => String(b.source).localeCompare(String(a.source)));
-
-  // 6) 출력(보호 범위만)
-  sheet.getRange(OUTPUT_HEADER_ROW, 1, OUTPUT_LAST_ROW - OUTPUT_HEADER_ROW + 1, 5).clearContent();
-
-  sheet.getRange(OUTPUT_HEADER_ROW, 1, 1, 5).setValues([
-    ['source', 'chapter', 'drive_link', 'Latex', 'score']
-  ]);
-
-  topN.forEach((item, idx) => {
-    const r = OUTPUT_START_ROW + idx;
-    sheet.getRange(r, 1).setValue(item.source);
-    sheet.getRange(r, 2).setValue(item.chapter);
-    sheet.getRange(r, 3).setValue(item.driveLink);
-    sheet.getRange(r, 4).setValue(item.latex);
-    sheet.getRange(r, 5).setValue(item.score);
-  });
+  _writeResults_(sheet, topN);
 
   ss.toast(
-    useChapterFilter
-      ? `유사문항 ${topN.length}개 (대단원 필터 ON: "${queryChapter}", TEXT=${wText.toFixed(2)}, MATH=${wMath.toFixed(2)})`
-      : `유사문항 ${topN.length}개 (대단원 필터 OFF, TEXT=${wText.toFixed(2)}, MATH=${wMath.toFixed(2)})`,
-    '검색',
-    3
+    (useChapterFilter
+      ? '유사문항 ' + topN.length + '개 (대단원: "' + queryChapter + '"'
+      : '유사문항 ' + topN.length + '개 (전체 검색')
+    + ', TEXT=' + weights.wText.toFixed(2) + ', MATH=' + weights.wMath.toFixed(2) + ')',
+    '검색', 3
   );
-
-  if (openViewer) FS_openViewerOnResults_(ss, sheet, topN.length);
 }
 
-/* ---------------------------
- * Viewer open
- * --------------------------- */
-function FS_openViewerOnResults_(ss, sheet, count) {
-  if (!count || count <= 0) {
-    ss.toast('표시할 검색 결과가 없습니다.', '안내', 3);
-    return;
-  }
-  const safeCount = Math.min(count, OUTPUT_LAST_ROW - OUTPUT_START_ROW + 1);
-  const range = sheet.getRange(OUTPUT_START_ROW, OUTPUT_LATEX_COL, safeCount, 1);
-  sheet.setActiveRange(range);
 
-  try {
-    if (typeof LV !== 'undefined' && LV && typeof LV.openDialog === 'function') {
-      LV.openDialog();
-    } else if (typeof lv_openDialog === 'function') {
-      lv_openDialog();
-    } else {
-      ss.toast('LatexViewer(LV) 함수를 찾지 못했습니다. LatexViewer.gs가 있는지 확인해줘.', '오류', 5);
-    }
-  } catch (err) {
-    ss.toast(`Viewer 오픈 실패: ${err && err.message ? err.message : err}`, '오류', 5);
-  }
-}
+/* =========================================================
+ * 입력 읽기
+ * ========================================================= */
 
-/* ---------------------------
- * Weights: F2/G2 (정규화)
- * --------------------------- */
-function FS_readWeightsFG_(sheet) {
-  let t = Number(sheet.getRange('F2').getValue());
-  let m = Number(sheet.getRange('G2').getValue());
-
-  if (!isFinite(t)) t = DEFAULT_W_TEXT;
-  if (!isFinite(m)) m = DEFAULT_W_MATH;
-
+function _readWeights_(sheet) {
+  var t = Number(sheet.getRange('F2').getValue());
+  var m = Number(sheet.getRange('G2').getValue());
+  if (!isFinite(t)) t = FS_DEFAULT_W_TEXT;
+  if (!isFinite(m)) m = FS_DEFAULT_W_MATH;
   t = Math.max(0, t);
   m = Math.max(0, m);
-
-  const sum = t + m;
-  if (sum <= 0) return { wText: DEFAULT_W_TEXT, wMath: DEFAULT_W_MATH };
-
+  var sum = t + m;
+  if (sum <= 0) return { wText: FS_DEFAULT_W_TEXT, wMath: FS_DEFAULT_W_MATH };
   return { wText: t / sum, wMath: m / sum };
 }
 
-/* ---------------------------
- * Load maps: PATTERN->idfText, FORM->idfMath
- * --------------------------- */
-function FS_loadIdfMaps_(statSheet) {
-  const last = statSheet.getLastRow();
-  const n = Math.max(last - 1, 0);
-  const vals = n ? statSheet.getRange(2, 1, n, 6).getValues() : [];
 
-  const idfText = new Map();
-  const idfMath = new Map();
+/* =========================================================
+ * Token_Stat 로드
+ * ========================================================= */
 
-  vals.forEach(r => {
-    const token = String(r[0] || '').trim();
-    const type  = String(r[1] || '').trim();
-    const w     = Number(r[4]); // weight (=idf*boost)
-    if (!token || !isFinite(w)) return;
+function _loadIdfMaps_(statSheet) {
+  var last = statSheet.getLastRow();
+  var n = Math.max(last - 1, 0);
+  var vals = n ? statSheet.getRange(2, 1, n, 6).getValues() : [];
 
-    if (type === 'TEXT' || type === 'PATTERN') idfText.set(token, w);
-    else if (type === 'MATH' || type === 'FORM') idfMath.set(token, w);
-  });
+  var textMap = new Map();
+  var mathMap = new Map();
 
-  return { idfText, idfMath };
+  for (var i = 0; i < vals.length; i++) {
+    var token = String(vals[i][0] || '').trim();
+    var type  = String(vals[i][1] || '').trim();
+    var w     = Number(vals[i][4]);
+    if (!token || !isFinite(w)) continue;
+
+    if (type === 'TEXT' || type === 'PATTERN') textMap.set(token, w);
+    else if (type === 'MATH' || type === 'FORM') mathMap.set(token, w);
+  }
+
+  return { text: textMap, math: mathMap };
 }
 
-/* ---------------------------
- * Extract tokens (+PATTERN/+FORM)
- * --------------------------- */
-function FS_extractTokensFromLatex_(latex) {
-  const s = String(latex || '');
 
-  const mathRawList = [];
-  const mathTokens = [];
-  const mathMatches = [...s.matchAll(/\$(.+?)\$/g)];
-  mathMatches.forEach(m => {
-    const raw = String(m[1] ?? '');
+/* =========================================================
+ * 토큰 추출
+ * ========================================================= */
+
+function _extractTokens_(latex) {
+  var s = String(latex || '');
+
+  // 수식 추출
+  var mathRawList  = [];
+  var mathTokens   = [];
+  var mathMatches  = s.match(/\$(.+?)\$/g) || [];
+
+  for (var i = 0; i < mathMatches.length; i++) {
+    var raw = mathMatches[i].slice(1, -1);  // $ 제거
     mathRawList.push(raw);
-    mathTokens.push(...FS_tokenizeMathLikeStat_(raw));
-  });
+    mathTokens = mathTokens.concat(_tokenizeMath_(raw));
+  }
 
-  const textOnly = s.replace(/\$(.+?)\$/g, ' ');
-  const textTokens = FS_tokenizeTextLikeStat_(textOnly);
+  // 텍스트 추출
+  var textOnly    = s.replace(/\$(.+?)\$/g, ' ');
+  var textTokens  = _tokenizeText_(textOnly);
 
-  const patternTokens = FS_extractPatternTokensForSearch_(textOnly);
-  const formTokens = FS_extractFormTokensForSearch_(mathRawList);
+  // PATTERN + FORM
+  var patternTokens = _extractPatternTokens_(textOnly);
+  var formTokens    = _extractFormTokens_(mathRawList);
 
-  return { textTokens, mathTokens, mathRawList, patternTokens, formTokens };
+  return {
+    textTokens: textTokens,
+    mathTokens: mathTokens,
+    mathRawList: mathRawList,
+    patternTokens: patternTokens,
+    formTokens: formTokens
+  };
 }
 
-/* ---------------------------
- * Tokenize (Token_Stat 규칙 호환)
- * --------------------------- */
-function FS_tokenizeTextLikeStat_(text) {
+function _tokenizeText_(text) {
   return String(text || '')
     .toLowerCase()
     .replace(/[0-9]/g, ' ')
     .replace(/[^\p{L}]/gu, ' ')
     .split(/\s+/)
-    .filter(t => t.length >= 1);
+    .filter(function(t) { return t.length >= 1; });
 }
 
-function FS_tokenizeMathLikeStat_(math) {
+function _tokenizeMath_(math) {
   return String(math || '')
-    .replace(/\\[a-zA-Z]+/g, m => ` ${m} `)
-    .replace(/[^a-zA-Z0-9\\]/g, ' $& ')
+    .replace(/\\[a-zA-Z]+/g, function(m) { return ' ' + m + ' '; })
+    .replace(/[^a-zA-Z0-9\\]/g, function(m) { return ' ' + m + ' '; })
     .split(/\s+/)
-    .filter(t => t.length >= 1)
-    .filter(t => !/^\d+$/.test(t)); // 순수 숫자 제거
+    .filter(function(t) { return t.length >= 1; })
+    .filter(function(t) { return !/^\d+$/.test(t); });
 }
 
-/* ---------------------------
- * PATTERN (PAT_ + PATG_)
- * --------------------------- */
-function FS_extractPatternTokensForSearch_(textOnly) {
-  const out = [];
 
-  const s = String(textOnly || '').toLowerCase();
-  if (/성립/.test(s)) out.push('PAT_성립');
-  if (/다음(은|을)/.test(s)) out.push('PAT_다음');
-  if (/모든\s*자연수/.test(s) || /자연수\s*n/.test(s)) out.push('PAT_모든자연수');
+/* =========================================================
+ * PATTERN 토큰 (PAT_ + PATG_)
+ * ========================================================= */
+
+function _extractPatternTokens_(textOnly) {
+  var out = [];
+  var s = String(textOnly || '').toLowerCase();
+
+  // 고정 패턴 (PAT_)
+  if (/성립/.test(s))                                     out.push('PAT_성립');
+  if (/다음(은|을)/.test(s))                               out.push('PAT_다음');
+  if (/모든\s*자연수/.test(s) || /자연수\s*n/.test(s))      out.push('PAT_모든자연수');
   if (/실수\s*전체/.test(s) || /실수\s*전체의\s*집합/.test(s)) out.push('PAT_실수전체');
-  if (/를\s*만족/.test(s)) out.push('PAT_를만족');
-  if (/라\s*하자/.test(s)) out.push('PAT_라하자');
+  if (/를\s*만족/.test(s))                                 out.push('PAT_를만족');
+  if (/라\s*하자/.test(s))                                 out.push('PAT_라하자');
 
-  out.push(...FS_extractPatternNgramsForSearch_(textOnly));
+  // n-gram (PATG_) — 공용 stopword 사용
+  var toks = _tokenizeText_(textOnly).filter(function(t) { return t.length >= 2; });
+  var clean = toks.filter(function(t) { return !FS_STOP_TEXT.has(t); });
+
+  if (clean.length >= 2) {
+    var seen = {};
+    var addN = function(n) {
+      for (var i = 0; i + n <= clean.length; i++) {
+        var key = 'PATG_' + clean.slice(i, i + n).join('_');
+        if (!seen[key]) { seen[key] = true; out.push(key); }
+      }
+    };
+    addN(2); addN(3); addN(4);
+  }
+
   return out;
 }
 
-function FS_extractPatternNgramsForSearch_(textOnly) {
-  const toks = FS_tokenizeTextLikeStat_(textOnly).filter(t => t.length >= 2);
 
-  const STOP = new Set([
-    '다음','각','모든','서로','대하여','하여','한다','이다','인','에서','의','을','를','은','는','이','가',
-    '그리고','또는','혹은','또','또한','때','경우','조건','만족','성립','하여라','구하여라','구하라',
-    '값','최댓값','최소값','최솟값','정답','보기','중','중에서',
-    '실수','정수','자연수','양수','음수','유리수','무리수',
-    '함수','수열','항','점','선분','직선','원','삼각형','사각형','다각형','좌표','평면',
-    '구간','범위','일때','이라','이라면','이고','이며','라고'
-  ]);
+/* =========================================================
+ * FORM 토큰
+ * ========================================================= */
 
-  const clean = toks.filter(t => !STOP.has(t));
-  if (clean.length < 2) return [];
+function _extractFormTokens_(mathRawList) {
+  var out = {};  // Set 대용
 
-  const out = new Set();
-  const addN = (n) => {
-    for (let i = 0; i + n <= clean.length; i++) {
-      out.add('PATG_' + clean.slice(i, i + n).join('_'));
-    }
-  };
+  for (var i = 0; i < (mathRawList || []).length; i++) {
+    var s = String(mathRawList[i] || '');
 
-  addN(2); addN(3); addN(4);
-  return Array.from(out);
+    // 기본
+    if (s.indexOf('\\int') !== -1)  out['FORM_int'] = 1;
+    if (s.indexOf('\\sum') !== -1)  out['FORM_sum'] = 1;
+    if (s.indexOf('\\sin') !== -1 || s.indexOf('\\cos') !== -1 || s.indexOf('\\tan') !== -1) out['FORM_trig'] = 1;
+    if (s.indexOf('\\log') !== -1 || s.indexOf('\\ln') !== -1)  out['FORM_log'] = 1;
+    if (s.indexOf('\\lim') !== -1)  out['FORM_lim'] = 1;
+    if (s.indexOf('\\sqrt') !== -1) out['FORM_sqrt'] = 1;
+    if (s.indexOf('\\frac') !== -1) out['FORM_frac'] = 1;
+
+    // 구조
+    if (/_/.test(s))  out['FORM_subscript'] = 1;
+    if (/\^/.test(s)) out['FORM_superscript'] = 1;
+    if (s.indexOf('\\left|') !== -1 || s.indexOf('\\right|') !== -1 || s.indexOf('|') !== -1) out['FORM_abs'] = 1;
+    if (s.indexOf('\\begin{cases}') !== -1 || s.indexOf('\\cases') !== -1) out['FORM_piecewise'] = 1;
+    if (/[()[\]]/.test(s)) out['FORM_interval'] = 1;
+
+    var eqCount = (s.match(/=/g) || []).length;
+    if (eqCount >= 2) out['FORM_eq_chain'] = 1;
+
+    // 조합
+    var hasFrac = s.indexOf('\\frac') !== -1;
+    var hasSqrt = s.indexOf('\\sqrt') !== -1;
+    var hasLog  = s.indexOf('\\log') !== -1 || s.indexOf('\\ln') !== -1;
+    var hasLim  = s.indexOf('\\lim') !== -1;
+    var hasInt  = s.indexOf('\\int') !== -1;
+    var hasSum  = s.indexOf('\\sum') !== -1;
+
+    if (hasFrac && hasSqrt) out['FORM_frac+sqrt'] = 1;
+    if (hasLog && hasLim)   out['FORM_log+lim'] = 1;
+    if (hasInt && hasFrac)  out['FORM_int+frac'] = 1;
+    if (hasSum && hasFrac)  out['FORM_sum+frac'] = 1;
+  }
+
+  return Object.keys(out);
 }
 
-/* ---------------------------
- * FORM tokens
- * --------------------------- */
-function FS_extractFormTokensForSearch_(mathRawList) {
-  const out = new Set();
 
-  (mathRawList || []).forEach(raw => {
-    const s = String(raw || '');
+/* =========================================================
+ * Stopword 필터 (공용 상수 사용)
+ * ========================================================= */
 
-    if (s.includes('\\int')) out.add('FORM_int');
-    if (s.includes('\\sum')) out.add('FORM_sum');
-    if (s.includes('\\sin') || s.includes('\\cos') || s.includes('\\tan')) out.add('FORM_trig');
-    if (s.includes('\\log') || s.includes('\\ln')) out.add('FORM_log');
-    if (s.includes('\\lim')) out.add('FORM_lim');
-    if (s.includes('\\sqrt')) out.add('FORM_sqrt');
-    if (s.includes('\\frac')) out.add('FORM_frac');
-
-    if (/_/.test(s)) out.add('FORM_subscript');
-    if (/\^/.test(s)) out.add('FORM_superscript');
-    if (s.includes('\\left|') || s.includes('\\right|') || s.includes('|')) out.add('FORM_abs');
-    if (s.includes('\\begin{cases}') || s.includes('\\cases')) out.add('FORM_piecewise');
-    if (/[()[\]]/.test(s)) out.add('FORM_interval');
-
-    const eqCount = (s.match(/=/g) || []).length;
-    if (eqCount >= 2) out.add('FORM_eq_chain');
-
-    const hasFrac = s.includes('\\frac');
-    const hasSqrt = s.includes('\\sqrt');
-    const hasLog  = s.includes('\\log') || s.includes('\\ln');
-    const hasLim  = s.includes('\\lim');
-    const hasInt  = s.includes('\\int');
-    const hasSum  = s.includes('\\sum');
-
-    if (hasFrac && hasSqrt) out.add('FORM_frac+sqrt');
-    if (hasLog && hasLim) out.add('FORM_log+lim');
-    if (hasInt && hasFrac) out.add('FORM_int+frac');
-    if (hasSum && hasFrac) out.add('FORM_sum+frac');
-  });
-
-  return Array.from(out);
-}
-
-/* ---------------------------
- * Stopwords / Noise
- * --------------------------- */
-function FS_filterStopText_(tokens) {
-  const STOP = new Set([
-    '다음','각','모든','서로','대하여','하여','한다','이다','인','에서','의','을','를','은','는','이','가',
-    '그리고','또는','혹은','또','또한','때','경우','조건','만족','성립','하여라','구하여라','구하라',
-    '값','최댓값','최소값','최솟값','정답','보기','다음은','중','중에서',
-    '실수','정수','자연수','양수','음수','유리수','무리수',
-    '함수','수열','항','점','선분','직선','원','삼각형','사각형','다각형','좌표','평면',
-    '구간','범위','일때','일때의','라할','라하면','라고','이라','이라면','이고','이며'
-  ]);
-
-  return (tokens || []).filter(t => {
-    if (!t) return false;
-    if (t.length <= 1) return false;
-    if (STOP.has(t)) return false;
+function _filterStopText_(tokens) {
+  return (tokens || []).filter(function(t) {
+    if (!t || t.length <= 1) return false;
+    if (FS_STOP_TEXT.has(t)) return false;
     return true;
   });
 }
 
-function FS_filterNoiseMath_(tokens) {
-  const NOISE = new Set(['\\|', '*', '/', '.', ',', ':', ';']);
-  return (tokens || []).filter(t => {
+function _filterStopMath_(tokens) {
+  return (tokens || []).filter(function(t) {
     if (!t) return false;
-    if (NOISE.has(t)) return false;
+    if (FS_STOP_MATH.has(t)) return false;
     if (/^\s+$/.test(t)) return false;
     return true;
   });
 }
 
-/* ---------------------------
- * TF-IDF vector
- * --------------------------- */
-function FS_buildTfidfVector_(tokens, idfMap) {
-  const tf = new Map();
-  (tokens || []).forEach(tok => tf.set(tok, (tf.get(tok) || 0) + 1));
 
-  const vec = new Map();
-  tf.forEach((cnt, tok) => {
-    const w = idfMap.get(tok);
+/* =========================================================
+ * TF-IDF 벡터
+ * ========================================================= */
+
+function _buildTfidfVec_(tokens, idfMap) {
+  var tf = new Map();
+  for (var i = 0; i < (tokens || []).length; i++) {
+    var tok = tokens[i];
+    tf.set(tok, (tf.get(tok) || 0) + 1);
+  }
+
+  var vec = new Map();
+  tf.forEach(function(cnt, tok) {
+    var w = idfMap.get(tok);
     if (!w) return;
-    const val = (1 + Math.log(cnt)) * w;
+    var val = (1 + Math.log(cnt)) * w;
     if (val > 0) vec.set(tok, val);
   });
 
   return vec;
 }
 
-/* ---------------------------
- * MATH vector + composite tokens
- * --------------------------- */
-function FS_buildTfidfVectorWithMathExtras_(mathRawList, baseMathTokens, idfMap) {
-  const tf = new Map();
-  (baseMathTokens || []).forEach(tok => tf.set(tok, (tf.get(tok) || 0) + 1));
+/** MATH 벡터: 기본 토큰 + composite (subscript/superscript 패턴) */
+function _buildMathVec_(mathRawList, baseMathTokens, idfMap) {
+  var tf = new Map();
+  for (var i = 0; i < (baseMathTokens || []).length; i++) {
+    var tok = baseMathTokens[i];
+    tf.set(tok, (tf.get(tok) || 0) + 1);
+  }
 
-  const extras = FS_makeMathCompositeTokens_(mathRawList);
-  extras.forEach(tok => tf.set(tok, (tf.get(tok) || 0) + 1));
+  // composite 토큰 (a_n, x^2 등 구조적 패턴)
+  var composites = _makeCompositeTokens_(mathRawList);
+  for (var j = 0; j < composites.length; j++) {
+    var ct = composites[j];
+    tf.set(ct, (tf.get(ct) || 0) + 1);
+  }
 
-  const vec = new Map();
-  tf.forEach((cnt, tok) => {
-    let w = idfMap.get(tok);
+  var vec = new Map();
+  tf.forEach(function(cnt, tok) {
+    var w = idfMap.get(tok);
     if (!w) {
-      w = FS_virtualIdfForComposite_(tok, idfMap);
+      w = _virtualIdf_(tok, idfMap);
       if (!w) return;
     }
-    const val = (1 + Math.log(cnt)) * w;
+    var val = (1 + Math.log(cnt)) * w;
     if (val > 0) vec.set(tok, val);
   });
 
   return vec;
 }
 
-function FS_makeMathCompositeTokens_(mathRawList) {
-  const out = [];
-  (mathRawList || []).forEach(raw => {
-    const s = String(raw || '');
+/**
+ * composite 토큰: subscript/superscript 패턴만 추출
+ * (기존 코드에서 \frac, \sqrt 등을 중복 push하던 문제 제거)
+ */
+function _makeCompositeTokens_(mathRawList) {
+  var out = [];
+  for (var i = 0; i < (mathRawList || []).length; i++) {
+    var s = String(mathRawList[i] || '');
 
-    for (const m of s.matchAll(/([a-zA-Z])\s*_\s*(\{[^}]+\}|[a-zA-Z0-9]+)/g)) {
-      const v = m[1];
-      const sub = m[2].replace(/[{}]/g, '');
-      if (sub) out.push(`${v}_${sub}`);
+    // a_n, f_{n+1} 등
+    var subMatches = s.match(/([a-zA-Z])\s*_\s*(\{[^}]+\}|[a-zA-Z0-9]+)/g) || [];
+    for (var j = 0; j < subMatches.length; j++) {
+      var m = subMatches[j].match(/([a-zA-Z])\s*_\s*(\{[^}]+\}|[a-zA-Z0-9]+)/);
+      if (m) {
+        var sub = m[2].replace(/[{}]/g, '');
+        if (sub) out.push(m[1] + '_' + sub);
+      }
     }
-    for (const m of s.matchAll(/([a-zA-Z0-9])\s*\^\s*(\{[^}]+\}|[a-zA-Z0-9]+)/g)) {
-      const v = m[1];
-      const sup = m[2].replace(/[{}]/g, '');
-      if (sup) out.push(`${v}^${sup}`);
+
+    // x^2, n^k 등
+    var supMatches = s.match(/([a-zA-Z0-9])\s*\^\s*(\{[^}]+\}|[a-zA-Z0-9]+)/g) || [];
+    for (var k = 0; k < supMatches.length; k++) {
+      var m2 = supMatches[k].match(/([a-zA-Z0-9])\s*\^\s*(\{[^}]+\}|[a-zA-Z0-9]+)/);
+      if (m2) {
+        var sup = m2[2].replace(/[{}]/g, '');
+        if (sup) out.push(m2[1] + '^' + sup);
+      }
     }
-
-    if (s.includes('\\frac')) out.push('\\frac');
-    if (s.includes('\\sqrt')) out.push('\\sqrt');
-    if (s.includes('\\log')) out.push('\\log');
-    if (s.includes('\\ln')) out.push('\\ln');
-    if (s.includes('\\sin')) out.push('\\sin');
-    if (s.includes('\\cos')) out.push('\\cos');
-    if (s.includes('\\tan')) out.push('\\tan');
-    if (s.includes('\\sum')) out.push('\\sum');
-    if (s.includes('\\lim')) out.push('\\lim');
-    if (s.includes('\\int')) out.push('\\int');
-  });
-
+  }
   return out;
 }
 
-function FS_virtualIdfForComposite_(tok, idfMap) {
-  if (tok.startsWith('\\')) {
-    const w = idfMap.get(tok);
-    return w || 0;
-  }
+function _virtualIdf_(tok, idfMap) {
+  // LaTeX 명령어는 직접 조회
+  if (tok.charAt(0) === '\\') return idfMap.get(tok) || 0;
 
-  const parts = tok.match(/[a-zA-Z0-9]+/g) || [];
-  let sum = 0, cnt = 0;
-
-  for (const p of parts) {
-    const w = idfMap.get(p);
+  // composite는 구성 요소의 idf 평균
+  var parts = tok.match(/[a-zA-Z0-9]+/g) || [];
+  var sum = 0, cnt = 0;
+  for (var i = 0; i < parts.length; i++) {
+    var w = idfMap.get(parts[i]);
     if (w) { sum += w; cnt++; }
   }
   if (cnt === 0) return 0;
-
-  return (sum / cnt) * 1.1;
+  return (sum / cnt) * FS_VIRTUAL_IDF_BOOST;
 }
 
-/* ---------------------------
- * Cosine utilities
- * --------------------------- */
-function FS_vecNorm_(vec) {
-  let s = 0;
-  vec.forEach(v => { s += v * v; });
+
+/* =========================================================
+ * Cosine 유사도
+ * ========================================================= */
+
+function _vecNorm_(vec) {
+  var s = 0;
+  vec.forEach(function(v) { s += v * v; });
   return Math.sqrt(s);
 }
 
-function FS_dot_(a, b) {
-  const [small, large] = (a.size <= b.size) ? [a, b] : [b, a];
-  let s = 0;
-  small.forEach((v, k) => {
-    const u = large.get(k);
-    if (u) s += v * u;
-  });
-  return s;
-}
-
-function FS_cosine_(qVec, qNorm, dVec) {
-  const dNorm = FS_vecNorm_(dVec);
+function _cosine_(qVec, qNorm, dVec) {
+  var dNorm = _vecNorm_(dVec);
   if (qNorm === 0 || dNorm === 0) return 0;
-  return FS_dot_(qVec, dVec) / (qNorm * dNorm);
+
+  // dot product (작은 쪽 기준 순회)
+  var dot = 0;
+  var small = qVec, large = dVec;
+  if (qVec.size > dVec.size) { small = dVec; large = qVec; }
+  small.forEach(function(v, k) {
+    var u = large.get(k);
+    if (u) dot += v * u;
+  });
+
+  return dot / (qNorm * dNorm);
 }
 
-/* ---------------------------
- * Misc
- * --------------------------- */
-function FS_clampInt_(value, min, max, fallback) {
-  const n = Number(value);
+
+/* =========================================================
+ * 출력
+ * ========================================================= */
+
+function _writeResults_(sheet, topN) {
+  // 출력 영역 초기화
+  sheet.getRange(FS_HEADER_ROW, 1, FS_LAST_ROW - FS_HEADER_ROW + 1, 5).clearContent();
+
+  // 헤더
+  sheet.getRange(FS_HEADER_ROW, 1, 1, 5).setValues([
+    ['source', 'chapter', 'drive_link', 'Latex', 'score']
+  ]);
+
+  // 데이터
+  if (topN.length === 0) return;
+
+  var rows = [];
+  for (var i = 0; i < topN.length; i++) {
+    rows.push([
+      topN[i].source,
+      topN[i].chapter,
+      topN[i].driveLink,
+      topN[i].latex,
+      topN[i].score
+    ]);
+  }
+  sheet.getRange(FS_START_ROW, 1, rows.length, 5).setValues(rows);
+}
+
+
+/* =========================================================
+ * 유틸
+ * ========================================================= */
+
+function _clampInt_(value, min, max, fallback) {
+  var n = Number(value);
   if (!isFinite(n)) return fallback;
-  const k = Math.floor(n);
-  if (k < min) return min;
-  if (k > max) return max;
-  return k;
+  var k = Math.floor(n);
+  return Math.max(min, Math.min(max, k));
 }
