@@ -295,10 +295,8 @@ function _callClaude_(apiKey, systemPrompt, userMessage) {
     temperature: TEMPERATURE_CLAUDE,
     system: systemPrompt,
     messages: [
-      { role: 'user', content: userMessage },
-      { role: 'assistant', content: '{' }
-    ],
-    stop_sequences: ['\n}']
+      { role: 'user', content: userMessage }
+    ]
   };
 
   var resp = _httpPost_(API_URL_CLAUDE, body, {
@@ -312,7 +310,31 @@ function _callClaude_(apiKey, systemPrompt, userMessage) {
       if (resp.content[i].type === 'text') { rawText = resp.content[i].text || ''; break; }
     }
   }
-  return '{' + rawText.trim() + '}';
+
+  // JSON 추출: LaTeX의 {} 를 건너뛰고 실제 JSON 객체를 찾음
+  rawText = rawText.trim();
+
+  // "has_edits" 키를 포함하는 JSON 객체의 시작점을 찾음
+  var jsonStart = rawText.indexOf('{"has_edits"');
+  if (jsonStart === -1) jsonStart = rawText.indexOf('{\n  "has_edits"');
+  if (jsonStart === -1) jsonStart = rawText.indexOf('{ "has_edits"');
+
+  if (jsonStart !== -1) {
+    // jsonStart부터 매칭되는 닫는 } 를 찾음 (중첩 고려)
+    var depth = 0;
+    for (var ci = jsonStart; ci < rawText.length; ci++) {
+      if (rawText[ci] === '{') depth++;
+      else if (rawText[ci] === '}') { depth--; if (depth === 0) return rawText.substring(jsonStart, ci + 1); }
+    }
+  }
+
+  // fallback: 마지막 수단으로 기존 방식
+  var first = rawText.lastIndexOf('{"');
+  var last  = rawText.lastIndexOf('}');
+  if (first !== -1 && last > first) {
+    return rawText.substring(first, last + 1);
+  }
+  return rawText;
 }
 
 /* ── GPT ── */
