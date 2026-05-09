@@ -738,3 +738,290 @@ function _getPromptValue_(key) {
   }
   throw new Error('prompt 시트에서 활성화된 key를 찾지 못했습니다: ' + key);
 }
+
+/* =========================================================
+ * 3사 병렬 호출 (fetchAll)
+ *
+ * review_rewriteAllProviders()
+ *   → Claude, GPT, Gemini를 동시에 호출하고
+ *     각각의 edits를 반환한다.
+ *
+ * 의존: 위에 이미 정의된 모든 상수·유틸 함수
+ * ========================================================= */
+
+/**
+ * 3사 LLM을 병렬로 호출하여 각 provider의 edits 배열을 반환.
+ * 배치 코드(batchKiceMulti.gs)에서 호출한다.
+ *
+ * @return {Object}
+ *   { empty: boolean,
+ *     claude: { edits: [], error: null|string },
+ *     gpt:    { edits: [], error: null|string },
+ *     gemini: { edits: [], error: null|string },
+ *     ruleEdits: [],
+ *     refs: [],
+ *     target: string }
+ */
+function review_rewriteAllProviders() {
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(SHEET_NAME);
+  if (!sh) throw new Error('시트를 찾을 수 없습니다: ' + SHEET_NAME);
+
+  // 0) 기존 출력 초기화
+  _clearOutput_(sh);
+
+  // 1) 입력 읽기
+  var targetRaw = String(sh.getRange('B2').getValue() || '').trim();
+  var chapter   = String(sh.getRange('C2').getValue() || '').trim();
+
+  if (!targetRaw) {
+    return { empty: true, claude: null, gpt: null, gemini: null };
+  }
+
+  // 2) Rule 로드 + 선치환
+  var rules   = _loadRules_();
+  var preRule  = _applyRulesWithLog_(targetRaw, rules);
+  var target   = preRule.text;
+  var ruleEditsAll = preRule.edits.slice();
+
+  // 3) 관련 기출문항 로드
+  var sources    = _flatCol_(sh, 'A6:A15');
+  var imageLinks = _flatCol_(sh, 'C6:C15');
+  var refsText   = _flatCol_(sh, 'D6:D15');
+
+  var refs = [];
+  for (var i = 0; i < refsText.length; i++) {
+    if (refsText[i]) {
+      refs.push({ source: sources[i] || '', imageLink: imageLinks[i] || '', text: refsText[i] });
+    }
+  }
+
+  // 4) API 키 로드 + 프롬프트 구성
+  var scriptProps = PropertiesService.getScriptProperties();
+  var providers   = ['claude', 'gpt', 'gemini'];
+
+  var apiKeys = {};
+  var systemPrompts = {};
+  providers.forEach(function(p) {
+    apiKeys[p]       = scriptProps.getProperty(PROVIDER_API_KEY_NAMES[p]) || '';
+    systemPrompts[p] = _buildSystemPrompt_(p, rules);
+  });
+
+  var userMessage = _buildUserMessage_(target, chapter, refs);
+
+  // 5) fetchAll 요청 구성 (병렬 호출)
+  var requests = providers.map(function(p) {
+    return _buildFetchRequest_(p, apiKeys[p], systemPrompts[p], userMessage);
+  });
+
+  var responses;
+  try {
+    responses = UrlFetchApp.fetchAll(requests);
+  } catch (e) {
+    // fetchAll 자체 실패 → 개별 순차 호출로 폴백
+    return _fallbackSequential_(providers, apiKeys, systemPrompts, userMessage, refs, target, ruleEditsAll);
+  }
+
+  // 6) 각 응답 파싱 + edits 필터링
+  var results = { empty: false, ruleEdits: ruleEditsAll, refs: refs, target: target };
+
+  for (var pi = 0; pi < providers.length; pi++) {
+    var provider = providers[pi];
+    try {
+      var httpResp = responses[pi];
+      var code = httpResp.getResponseCode();
+
+      if (code < 200 || code >= 300) {
+        // 병렬 호출 실패 → 해당 provider만 개별 재시도
+        try {
+          var parsed = _callLLM_(provider, apiKeys[provider], systemPrompts[provider], userMessage);
+          results[provider] = { edits: _filterEditsCommon_(parsed, refs, provider), error: null };
+        } catch (retryErr) {
+          results[provider] = { edits: [], error: '(재시도 실패) ' + (retryErr.message || retryErr) };
+        }
+      } else {
+        var jsonText = _extractJsonFromRawHttp_(provider, httpResp);
+        jsonText = _fixLatexEscapesInJson_(jsonText);
+        var parsed  = JSON.parse(jsonText);
+        results[provider] = { edits: _filterEditsCommon_(parsed, refs, provider), error: null };
+      }
+    } catch (e) {
+      results[provider] = { edits: [], error: e.message || String(e) };
+    }
+  }
+
+  return results;
+}
+
+
+/* ── fetchAll 요청 빌더 ── */
+
+function _buildFetchRequest_(provider, apiKey, systemPrompt, userMessage) {
+  var url, body, headers = {};
+
+  if (provider === 'claude') {
+    url = API_URL_CLAUDE;
+    body = {
+      model: MODEL_CLAUDE,
+      max_tokens: MAX_TOKENS_CLAUDE,
+      temperature: TEMPERATURE_CLAUDE,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMessage }]
+    };
+    headers = { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' };
+
+  } else if (provider === 'gpt') {
+    url = API_URL_GPT;
+    body = {
+      model: MODEL_GPT,
+      max_completion_tokens: MAX_TOKENS_GPT,
+      temperature: TEMPERATURE_GPT,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: userMessage }
+      ]
+    };
+    headers = { 'Authorization': 'Bearer ' + apiKey };
+
+  } else if (provider === 'gemini') {
+    url = API_URL_GEMINI_BASE + MODEL_GEMINI + ':generateContent?key=' + apiKey;
+    body = {
+      contents: [{ role: 'user', parts: [{ text: userMessage }] }],
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      generationConfig: {
+        temperature: TEMPERATURE_GEMINI,
+        maxOutputTokens: MAX_TOKENS_GEMINI,
+        responseMimeType: 'application/json'
+      }
+    };
+  }
+
+  return {
+    url: url,
+    method: 'post',
+    contentType: 'application/json',
+    headers: headers,
+    payload: JSON.stringify(body),
+    muteHttpExceptions: true
+  };
+}
+
+
+/* ── 병렬 응답에서 JSON 텍스트 추출 ── */
+
+function _extractJsonFromRawHttp_(provider, httpResp) {
+  var text = httpResp.getContentText();
+  var resp = JSON.parse(text);
+
+  if (provider === 'claude') {
+    var rawText = '';
+    if (resp && Array.isArray(resp.content)) {
+      for (var i = 0; i < resp.content.length; i++) {
+        if (resp.content[i].type === 'text') { rawText = resp.content[i].text || ''; break; }
+      }
+    }
+    rawText = rawText.trim();
+
+    var jsonStart = rawText.indexOf('{"has_edits"');
+    if (jsonStart === -1) jsonStart = rawText.indexOf('{\n  "has_edits"');
+    if (jsonStart === -1) jsonStart = rawText.indexOf('{ "has_edits"');
+
+    if (jsonStart !== -1) {
+      var depth = 0;
+      for (var ci = jsonStart; ci < rawText.length; ci++) {
+        if (rawText[ci] === '{') depth++;
+        else if (rawText[ci] === '}') { depth--; if (depth === 0) return rawText.substring(jsonStart, ci + 1); }
+      }
+    }
+    var first = rawText.lastIndexOf('{"');
+    var last  = rawText.lastIndexOf('}');
+    if (first !== -1 && last > first) return rawText.substring(first, last + 1);
+    return rawText;
+
+  } else if (provider === 'gpt') {
+    if (resp && resp.choices && resp.choices.length > 0 && resp.choices[0].message) {
+      return resp.choices[0].message.content.trim();
+    }
+    throw new Error('GPT 응답에서 content를 추출하지 못했습니다.');
+
+  } else if (provider === 'gemini') {
+    if (resp && resp.candidates && resp.candidates.length > 0) {
+      var candidate = resp.candidates[0];
+      if (candidate.finishReason === 'SAFETY' || candidate.finishReason === 'BLOCKED') {
+        throw new Error('Gemini: 안전 필터에 의해 응답이 차단되었습니다.');
+      }
+      if (candidate.finishReason === 'MAX_TOKENS') {
+        throw new Error('Gemini: 출력 토큰 제한을 초과했습니다.');
+      }
+      var parts = candidate.content && candidate.content.parts;
+      if (parts) {
+        for (var i = 0; i < parts.length; i++) {
+          if (parts[i].text) {
+            var t = parts[i].text.trim()
+              .replace(/^```json\s*/i, '').replace(/\s*```$/i, '');
+            var f = t.indexOf('{'), l = t.lastIndexOf('}');
+            if (f !== -1 && l > f) return t.substring(f, l + 1);
+            return t;
+          }
+        }
+      }
+    }
+    var detail = '';
+    if (resp && resp.promptFeedback && resp.promptFeedback.blockReason) {
+      detail = ' (사유: ' + resp.promptFeedback.blockReason + ')';
+    }
+    throw new Error('Gemini 응답에서 유효한 텍스트를 추출하지 못했습니다.' + detail);
+  }
+
+  throw new Error('알 수 없는 provider: ' + provider);
+}
+
+
+/* ── edits 공통 필터링 (기존 로직과 동일) ── */
+
+function _filterEditsCommon_(parsed, refs, provider) {
+  var editsRaw = Array.isArray(parsed.edits) ? parsed.edits : [];
+
+  return editsRaw
+    .filter(function(e) { return !_isWhitespaceOnlyEdit_(e.original, e.revised); })
+    .filter(function(e) { return _validateEvidence_(e, refs); })
+    .filter(function(e) {
+      var orig = String(e.original || '').trim();
+      if (orig && _existsInAnyRef_(orig, refs)) {
+        var rev = String(e.revised || '').trim();
+        if (!rev || !_existsInAnyRef_(rev, refs)) return false;
+      }
+      return true;
+    })
+    .map(function(e) {
+      var rawIdx   = _sanitizeSourceIndex_(e.source_index, refs.length);
+      var verified = _verifyOrFindSourceIndex_(rawIdx, String(e.revised || '').trim(), refs);
+      return {
+        source_index:   verified,
+        original:       String(e.original || '').trim(),
+        revised:        String(e.revised || '').trim(),
+        evidence_quote: String(e.evidence_quote || '').trim(),
+        reason:         String(e.reason || '').trim(),
+        _kind:          provider.toUpperCase()
+      };
+    });
+}
+
+
+/* ── fetchAll 전체 실패 시 순차 폴백 ── */
+
+function _fallbackSequential_(providers, apiKeys, systemPrompts, userMessage, refs, target, ruleEditsAll) {
+  var results = { empty: false, ruleEdits: ruleEditsAll, refs: refs, target: target };
+
+  for (var i = 0; i < providers.length; i++) {
+    var p = providers[i];
+    try {
+      var parsed = _callLLM_(p, apiKeys[p], systemPrompts[p], userMessage);
+      results[p] = { edits: _filterEditsCommon_(parsed, refs, p), error: null };
+    } catch (e) {
+      results[p] = { edits: [], error: e.message || String(e) };
+    }
+  }
+  return results;
+}
