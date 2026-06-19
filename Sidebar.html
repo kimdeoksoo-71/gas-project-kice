@@ -3,15 +3,10 @@
   <head>
     <base target="_top">
     <meta charset="UTF-8" />
-    <script>
-      window.MathJax = {
-        tex: {
-          inlineMath: [['$', '$'], ['$$', '$$'], ['\\(', '\\)'], ['\(', '\)']]
-        },
-        svg: { fontCache: 'global' }
-      };
-    </script>
-    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
+    <!-- KaTeX (MathJax 대체: 렌더링 속도 개선) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.css" crossorigin="anonymous" />
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.js" crossorigin="anonymous"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
 
     <style>
       body {
@@ -68,6 +63,24 @@
     <script>
       let lastRange = "";
 
+      // KaTeX 공통 옵션 및 렌더 헬퍼
+      const KATEX_OPTS = {
+        delimiters: [
+          { left: '$$', right: '$$', display: true },
+          { left: '\\[', right: '\\]', display: true },
+          { left: '\\(', right: '\\)', display: false },
+          { left: '$', right: '$', display: false }
+        ],
+        throwOnError: false,
+        errorColor: '#c00',
+        ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+      };
+      function katexRender(targets) {
+        // 스크립트가 아직 로드되지 않았으면 잠시 후 재시도
+        if (!window.renderMathInElement) { setTimeout(() => katexRender(targets), 150); return; }
+        targets.forEach(el => { if (el) renderMathInElement(el, KATEX_OPTS); });
+      }
+
       function renderRange(res) {
         const container = document.getElementById('container');
         
@@ -93,10 +106,8 @@
 
         container.innerHTML = htmlBuffer;
 
-        // MathJax 렌더링
-        if (window.MathJax && window.MathJax.typesetPromise) {
-          window.MathJax.typesetPromise([container]).catch(err => console.error(err));
-        }
+        // KaTeX 렌더링
+        katexRender([container]);
       }
 
       function fetchData() {

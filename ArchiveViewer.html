@@ -5,18 +5,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <!-- MathJax -->
-  <script>
-    window.MathJax = {
-      tex: {
-        inlineMath: [['$', '$'], ['\\(', '\\)']],
-        displayMath: [['$$', '$$'], ['\\[', '\\]']],
-        processEscapes: true
-      },
-      options: { skipHtmlTags: ['script','noscript','style','textarea','pre','code'] }
-    };
-  </script>
-  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  <!-- KaTeX (MathJax 대체: 렌더링 속도 개선) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.css" crossorigin="anonymous" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
 
   <style>
     :root { --bd:#e8e8e8; --bg:#fff; --muted: rgba(0,0,0,.65); }
@@ -163,12 +155,23 @@
         .replace(/>/g,'&gt;');
     }
 
+    // KaTeX 공통 옵션 및 렌더 헬퍼
+    const KATEX_OPTS = {
+      delimiters: [
+        { left: '$$', right: '$$', display: true },
+        { left: '\\[', right: '\\]', display: true },
+        { left: '\\(', right: '\\)', display: false },
+        { left: '$', right: '$', display: false }
+      ],
+      throwOnError: false,
+      errorColor: '#c00',
+      ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+    };
+
     function typesetAll() {
       const targets = [document.getElementById('leftList'), document.getElementById('rightList')];
-      if (window.MathJax && MathJax.typesetPromise) {
-        MathJax.typesetClear(targets);
-        MathJax.typesetPromise(targets).catch(console.error);
-      }
+      if (!window.renderMathInElement) { setTimeout(typesetAll, 150); return; }
+      targets.forEach(el => { if (el) renderMathInElement(el, KATEX_OPTS); });
     }
 
     function renderLlmBlock(label, cssClass, html) {
