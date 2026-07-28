@@ -40,4 +40,5 @@
 [자기 점검]
 1. original이 <references>의 어떤 ref에 글자 그대로 있으면 → 이 edit 삭제.
 2. revised가 <references>의 어떤 ref에도 글자 그대로 없으면 → 이 edit 삭제.
+3. original과 revised의 차이가 선지 번호 표기(① ↔ (1))뿐이거나 조사(을/를, 이/가, 은/는, 과/와, 로/으로)뿐이면 → 이 edit 삭제.
 </output_format>
