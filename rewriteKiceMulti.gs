@@ -126,6 +126,10 @@ function review_rewriteToKiceStyle(options) {
   var editsRaw = Array.isArray(parsed.edits) ? parsed.edits : [];
 
   var llmEdits = editsRaw
+    // (패치 A) 선지 번호 표기(①↔(1))만 다른 수정 제거
+    .filter(function(e) { return !_isChoiceMarkerOnlyEdit_(e.original, e.revised); })
+    // (패치 A) 조사(을/를, 이/가, 은/는, 과/와, 로/으로)만 다른 수정 제거
+    .filter(function(e) { return !_isJosaOnlyEdit_(e.original, e.revised); })
     // 공백만 다른 수정 제거
     .filter(function(e) { return !_isWhitespaceOnlyEdit_(e.original, e.revised); })
     // evidence_quote 검증
@@ -178,6 +182,16 @@ function review_rewriteToKiceStyle(options) {
         rewrittenFromModel = rewrittenFromModel.split(rejRevised).join(rejOriginal);
       }
     }
+  }
+
+  // (패치 A) 원문이 원문자 선지(①~⑤)인데 결과에 줄 첫머리 괄호 숫자가
+  //          생겼으면 원문자로 원상 복구
+  if (rewrittenFromModel && /[①②③④⑤]/.test(target)) {
+    var CIRCLED_BACK = { '1': '①', '2': '②', '3': '③', '4': '④', '5': '⑤' };
+    rewrittenFromModel = rewrittenFromModel.replace(
+      /(^|\n)\(([1-5])\)(?=[ \t])/g,
+      function(m, pre, d) { return pre + CIRCLED_BACK[d]; }
+    );
   }
 
   var baseFull = rewrittenFromModel || target;
@@ -685,6 +699,45 @@ function _isWhitespaceOnlyEdit_(original, revised) {
   return o.replace(/\s+/g, '') === r.replace(/\s+/g, '');
 }
 
+/* =========================================================
+ * (패치 A) 수정제안 제외 필터
+ *  - 선지 번호 표기(①~⑤ ↔ (1)~(5))만 다른 edit
+ *  - 조사(을/를, 이/가, 은/는, 과/와, 로/으로)만 다른 edit
+ * ========================================================= */
+
+// ①~⑩ ↔ (1)~(10) 표기만 다른 edit인지 판정
+function _isChoiceMarkerOnlyEdit_(orig, rev) {
+  var MAP = { '①': '(1)', '②': '(2)', '③': '(3)', '④': '(4)', '⑤': '(5)',
+              '⑥': '(6)', '⑦': '(7)', '⑧': '(8)', '⑨': '(9)', '⑩': '(10)' };
+  var norm = function(s) {
+    return String(s || '')
+      .replace(/[①②③④⑤⑥⑦⑧⑨⑩]/g, function(m) { return MAP[m]; })
+      .replace(/\s+/g, '');
+  };
+  var o = norm(orig), r = norm(rev);
+  return o !== '' && o === r
+    && String(orig).replace(/\s+/g, '') !== String(rev).replace(/\s+/g, '');
+}
+
+// 어절 끝 조사를 한쪽으로 통일한 뒤 비교 → 조사만 다른 edit 판정
+// ※ 은/는 통일은 드물게 관형형 어미 교정(예: 얻는↔얻은)까지 걸러낼 수 있음.
+//   어미 교정 제안을 살리려면 아래에서 '는' 치환 줄을 제거할 것.
+function _isJosaOnlyEdit_(orig, rev) {
+  var B = '(?=[\\s.,!?)\\]}"\']|$)';   // 어절 경계(공백·구두점·문자열 끝)
+  var norm = function(s) {
+    var t = String(s || '');
+    t = t.replace(new RegExp('를' + B, 'g'), '을');
+    t = t.replace(new RegExp('가' + B, 'g'), '이');
+    t = t.replace(new RegExp('는' + B, 'g'), '은');
+    t = t.replace(new RegExp('와' + B, 'g'), '과');
+    t = t.replace(new RegExp('으로' + B, 'g'), '로');
+    return t.replace(/\s+/g, '');
+  };
+  var o = norm(orig), r = norm(rev);
+  return o !== '' && o === r
+    && String(orig).replace(/\s+/g, '') !== String(rev).replace(/\s+/g, '');
+}
+
 function _existsInAnyRef_(phrase, refs) {
   if (!phrase || !refs || refs.length === 0) return false;
   var norm = phrase.replace(/\s+/g, '');
@@ -984,6 +1037,9 @@ function _filterEditsCommon_(parsed, refs, provider) {
   var editsRaw = Array.isArray(parsed.edits) ? parsed.edits : [];
 
   return editsRaw
+    // (패치 A) 선지 번호 표기 / 조사만 다른 수정 제거
+    .filter(function(e) { return !_isChoiceMarkerOnlyEdit_(e.original, e.revised); })
+    .filter(function(e) { return !_isJosaOnlyEdit_(e.original, e.revised); })
     .filter(function(e) { return !_isWhitespaceOnlyEdit_(e.original, e.revised); })
     .filter(function(e) { return _validateEvidence_(e, refs); })
     .filter(function(e) {

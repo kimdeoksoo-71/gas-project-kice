@@ -1,8 +1,12 @@
 /*****************************************************
- * Find Similar (TF-IDF + Cosine)
+ * Find Similar (TF-IDF + Cosine + 문장 단위 재랭킹)
  *
  * ▸ Token_Stat의 TEXT/MATH/PATTERN/FORM 가중치를 활용
  * ▸ C2 대단원 필터: 값이 있으면 같은 chapter만 검색
+ * ▸ (패치 C) 1단계 TF-IDF 코사인 상위 K개를
+ *   "질의 문장별 char 3-gram 포함률"로 2단계 재랭킹
+ * ▸ (패치 D) 코퍼스 토큰화를 실행(execution) 단위로 캐시
+ *   → 배치(batch_continueQueAuto)에서 행마다 재토큰화하지 않음
  *
  * Input (문항검토 시트):
  *  B2: query latex (본문+수식)
@@ -31,6 +35,14 @@ const FS_LATEX_COL  = 4;    // D열
 
 // composite 토큰의 가상 idf 배율
 const FS_VIRTUAL_IDF_BOOST = 1.1;
+
+// ── (패치 C) 문장 단위 재랭킹 파라미터 ──
+const FS_RERANK_TOP_K = 60;    // 1단계 cosine 상위 K개만 재랭킹
+const FS_W_SENT       = 0.45;  // 최종 = (1-γ)·cosine + γ·문장점수
+const FS_NGRAM_N      = 3;     // char n-gram 크기
+
+// 출력 정렬: false = 최종 점수순(권장), true = 기존처럼 source 내림차순
+const FS_SORT_RESULTS_BY_SOURCE = false;
 
 // ── 공용 Stopword (빌드와 검색에서 동일하게 사용) ──
 const FS_STOP_TEXT = new Set([
@@ -94,24 +106,18 @@ function findSimilarFromB2(options) {
   var qMathVec   = _buildMathVec_(qTokens.mathRawList, qMathToks, idfMaps.math);
   var qTextNorm  = _vecNorm_(qTextVec);
   var qMathNorm  = _vecNorm_(qMathVec);
+  var qSentGrams = _fsSentGramsOf_(query);   // (패치 C) 질의 문장별 n-gram
 
-  // ── Data 스캔 ──
-  var data = dataSheet.getDataRange().getValues();
+  // ── Data 스캔 (패치 D: 캐시된 코퍼스 사용) ──
+  var docs = _getCorpus_(dataSheet);
   var scored = [];
 
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i];
-    var latex   = row[2];  // C
-    if (!latex) continue;
+  for (var i = 0; i < docs.length; i++) {
+    var doc = docs[i];
+    if (useChapterFilter && doc.chapter !== queryChapter) continue;
 
-    var chapter = String(row[9] || '').trim();  // J
-    if (useChapterFilter && chapter !== queryChapter) continue;
-
-    var dTokens   = _extractTokens_(latex);
-    var dTextToks = _filterStopText_(dTokens.textTokens.concat(dTokens.patternTokens));
-    var dMathToks = _filterStopMath_(dTokens.mathTokens.concat(dTokens.formTokens));
-    var dTextVec  = _buildTfidfVec_(dTextToks, idfMaps.text);
-    var dMathVec  = _buildMathVec_(dTokens.mathRawList, dMathToks, idfMaps.math);
+    var dTextVec = _buildTfidfVec_(doc.textToks, idfMaps.text);
+    var dMathVec = _buildMathVec_(doc.mathRawList, doc.mathToks, idfMaps.math);
 
     var textScore = _cosine_(qTextVec, qTextNorm, dTextVec);
     var mathScore = _cosine_(qMathVec, qMathNorm, dMathVec);
@@ -120,19 +126,33 @@ function findSimilarFromB2(options) {
     if (score > 0) {
       scored.push({
         score: score,
-        source: row[8],     // I
-        chapter: chapter,
-        driveLink: row[1],  // B
-        latex: latex,
-        rowIndex: i + 1
+        source: doc.source,
+        chapter: doc.chapter,
+        driveLink: doc.driveLink,
+        latex: doc.latex,
+        sentGrams: doc.sentGrams,
+        rowIndex: doc.rowIndex
       });
     }
   }
 
-  // ── 정렬 + 출력 ──
+  // ── (패치 C) 1단계 정렬 → 상위 K 문장 단위 재랭킹 ──
   scored.sort(function(a, b) { return b.score - a.score || a.rowIndex - b.rowIndex; });
-  var topN = scored.slice(0, topNCount);
-  topN.sort(function(a, b) { return String(b.source).localeCompare(String(a.source)); });
+  var pool = scored.slice(0, FS_RERANK_TOP_K);
+
+  for (var pi = 0; pi < pool.length; pi++) {
+    var sentScore = _fsSentenceScore_(qSentGrams, pool[pi].sentGrams);
+    pool[pi].sentScore  = sentScore;
+    pool[pi].finalScore = (1 - FS_W_SENT) * pool[pi].score + FS_W_SENT * sentScore;
+  }
+
+  pool.sort(function(a, b) { return b.finalScore - a.finalScore || a.rowIndex - b.rowIndex; });
+  var topN = pool.slice(0, topNCount);
+  for (var ti = 0; ti < topN.length; ti++) topN[ti].score = topN[ti].finalScore;
+
+  if (FS_SORT_RESULTS_BY_SOURCE) {
+    topN.sort(function(a, b) { return String(b.source).localeCompare(String(a.source)); });
+  }
 
   _writeResults_(sheet, topN);
 
@@ -160,6 +180,136 @@ function _readWeights_(sheet) {
   var sum = t + m;
   if (sum <= 0) return { wText: FS_DEFAULT_W_TEXT, wMath: FS_DEFAULT_W_MATH };
   return { wText: t / sum, wMath: m / sum };
+}
+
+
+/* =========================================================
+ * (패치 D) 코퍼스 캐시 — 같은 실행(execution) 안에서만 유지
+ *
+ * batch_continueQueAuto()는 한 실행에서 여러 행을 돌며 매번
+ * findSimilarFromB2()를 호출하므로, 토큰화(불변 데이터)를
+ * 전역 변수에 캐시하면 첫 호출만 비용을 낸다.
+ * TF-IDF 벡터는 매 검색마다 조립하므로 Token_Stat을 다시
+ * 빌드해도 안전하다.
+ * ========================================================= */
+
+var __FS_CORPUS_CACHE = null;
+
+function _getCorpus_(dataSheet) {
+  if (__FS_CORPUS_CACHE) return __FS_CORPUS_CACHE;
+
+  var data = dataSheet.getDataRange().getValues();
+  var docs = [];
+
+  for (var i = 1; i < data.length; i++) {
+    var latex = data[i][2];                        // C열
+    if (!latex) continue;
+
+    var t = _extractTokens_(latex);
+    docs.push({
+      rowIndex:    i + 1,
+      latex:       latex,
+      driveLink:   data[i][1],                     // B열
+      source:      data[i][8],                     // I열
+      chapter:     String(data[i][9] || '').trim(),// J열
+      textToks:    _filterStopText_(t.textTokens.concat(t.patternTokens)),
+      mathToks:    _filterStopMath_(t.mathTokens.concat(t.formTokens)),
+      mathRawList: t.mathRawList,
+      sentGrams:   _fsSentGramsOf_(latex)          // (패치 C) 문장별 n-gram
+    });
+  }
+
+  __FS_CORPUS_CACHE = docs;
+  return docs;
+}
+
+
+/* =========================================================
+ * (패치 C) 문장 단위 재랭킹
+ *
+ * 질의의 각 문장이 후보 문항의 어떤 문장에 얼마나 "포함"
+ * 되는지(char 3-gram containment)를 보고, 문장 길이 가중
+ * 평균을 최종 점수에 섞는다. 어절 토큰과 달리 활용형 차이
+ * (구하시오/구하여라 등)에 강하고, Token_Stat 등재 여부와
+ * 무관하게 모든 구절이 점수에 반영된다.
+ * ========================================================= */
+
+// LaTeX 인지 문장 분리 ($...$ 내부의 . 은 문장 경계로 보지 않음)
+function _fsSplitSentences_(latex) {
+  var out = [];
+  var lines = String(latex || '').split(/\n+/);
+
+  for (var li = 0; li < lines.length; li++) {
+    var line = lines[li].trim();
+    if (!line) continue;
+
+    var cur = '', inMath = false;
+    for (var i = 0; i < line.length; i++) {
+      var ch = line[i];
+      if (ch === '$') inMath = !inMath;
+      cur += ch;
+      if (!inMath && (ch === '.' || ch === '?' || ch === '!')) {
+        var next = (i + 1 < line.length) ? line[i + 1] : '';
+        if (next === ' ' || next === '\t' || i + 1 >= line.length) {
+          if (cur.trim()) out.push(cur.trim());
+          cur = '';
+        }
+      }
+    }
+    if (cur.trim()) out.push(cur.trim());
+  }
+  return out;
+}
+
+// 문장 → char n-gram 집합 (수식 내용 포함, LaTeX 명령·기호 제거)
+function _fsSentGrams_(sent) {
+  var s = String(sent || '')
+    .toLowerCase()
+    .replace(/\\[a-zA-Z]+/g, ' ')            // \frac 등 LaTeX 명령 제거
+    .replace(/[^0-9a-z가-힣]/g, ''); // 한글·영문·숫자만
+  var set = {}, cnt = 0;
+
+  if (s.length > 0 && s.length < FS_NGRAM_N) { set[s] = 1; cnt = 1; }
+  for (var i = 0; i + FS_NGRAM_N <= s.length; i++) {
+    var g = s.substr(i, FS_NGRAM_N);
+    if (!set[g]) { set[g] = 1; cnt++; }
+  }
+  return { set: set, size: cnt, len: s.length };
+}
+
+function _fsSentGramsOf_(latex) {
+  var sents = _fsSplitSentences_(latex);
+  var out = [];
+  for (var i = 0; i < sents.length; i++) {
+    var g = _fsSentGrams_(sents[i]);
+    if (g.size > 0) out.push(g);
+  }
+  return out;
+}
+
+// 포함률: 질의 문장의 n-gram 중 후보 문장에도 있는 비율
+function _fsContainment_(q, d) {
+  if (!q.size || !d.size) return 0;
+  var hit = 0;
+  for (var g in q.set) { if (d.set[g]) hit++; }
+  return hit / q.size;
+}
+
+// 질의 각 문장 → 후보 문장 중 최대 포함률 → 문장 길이 가중 평균
+function _fsSentenceScore_(qGrams, dGrams) {
+  if (!qGrams || !dGrams || !qGrams.length || !dGrams.length) return 0;
+
+  var num = 0, den = 0;
+  for (var i = 0; i < qGrams.length; i++) {
+    var best = 0;
+    for (var j = 0; j < dGrams.length; j++) {
+      var c = _fsContainment_(qGrams[i], dGrams[j]);
+      if (c > best) { best = c; if (best >= 0.999) break; }
+    }
+    num += best * qGrams[i].len;
+    den += qGrams[i].len;
+  }
+  return den ? num / den : 0;
 }
 
 

@@ -38,6 +38,9 @@ const TS_PATG_MAX_DF_RATIO = 0.15;
 // ✅ 추가: MATH df=1 제거
 const TS_MATH_MIN_DF = 2;
 
+// (패치) TEXT df=1 토큰(오탈자·희귀 고유어) 제거 — 1로 두면 기존 동작
+const TS_TEXT_MIN_DF = 2;
+
 // (옵션) FORM도 df=1 제거하고 싶으면 2로 바꿔
 const TS_FORM_MIN_DF = 1;
 
@@ -124,6 +127,9 @@ function buildTokenStatFromDataLatex() {
 
     // TEXT 1글자 제거
     if (type === 'TEXT' && token.length <= 1) return false;
+
+    // (패치) TEXT 저빈도 토큰 제거
+    if (type === 'TEXT' && df < TS_TEXT_MIN_DF) return false;
 
     // MATH 순수 숫자 제거(방어)
     if (type === 'MATH' && /^\d+$/.test(token)) return false;
