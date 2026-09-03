@@ -38,7 +38,7 @@ const FS_VIRTUAL_IDF_BOOST = 1.1;
 
 // ── (패치 C) 문장 단위 재랭킹 파라미터 ──
 const FS_RERANK_TOP_K = 60;    // 1단계 cosine 상위 K개만 재랭킹
-const FS_W_SENT       = 0.45;  // 최종 = (1-γ)·cosine + γ·문장점수
+const FS_W_SENT       = 0.6;  // 최종 = (1-γ)·cosine + γ·문장점수
 const FS_NGRAM_N      = 3;     // char n-gram 크기
 
 // 출력 정렬: false = 최종 점수순(권장), true = 기존처럼 source 내림차순
