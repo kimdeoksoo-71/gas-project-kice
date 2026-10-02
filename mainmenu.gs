@@ -17,6 +17,8 @@ function onOpen() {
   menu.addItem('▶️ Que 자동윤문 시작', 'batch_startQueAuto');
   menu.addItem('⏹️ Que 자동윤문 중지', 'batch_stopQueAuto');
   menu.addSeparator();
+  menu.addItem('📋 KICE 자동 상태', 'kice_showStatus');
+  menu.addSeparator();
   menu.addItem('✅ 현재 프롬프트를 github에 push', 'pushIndividualPromptsToGithub');
   
   // ---- Token 테이블 ----

@@ -68,7 +68,7 @@ function findSimilarFromB2(options) {
   options = options || {};
 
   var ss = SpreadsheetApp.getActive();
-  var sheet = ss.getActiveSheet();
+  var sheet = options.sheet || ss.getActiveSheet();   // 2026-10-02 v4 §4.8: 배치가 시트를 직접 넘김(웹앱 경유 안전)
   var dataSheet = ss.getSheetByName('Data_Latex');
   var statSheet = ss.getSheetByName('Token_Stat');
 
