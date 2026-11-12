@@ -7,6 +7,8 @@
  * - 우 [v4 D23]:
  *     row ≥ QV_LAYOUT_SWITCH_ROW(864): E/F/G 를 Claude / GPT / Gemini 로 표시
  *     row <  864: D~G 중 값이 있는 열을 "D열(옛)" 처럼 열 이름 그대로 표시 (회사 이름을 추측해 붙이지 않음)
+ *     row ≥ 속성 QV_LAYOUT_SWITCH_ROW_2: E/F/G 를 Claude / 합의 / Gemini 로 표시 (kice-2.0.0 — F열의 뜻이 GPT 에서 합의로 바뀐 경계.
+ *         전환 때 아카이브 증분 복사를 마친 뒤 마지막 행 + 1 을 스크립트 속성에 적는다. 속성이 없으면 이 구분은 쓰지 않는다)
  * - 호환: 예전 필드 claude/gpt/gemini 도 새 배치(E/F/G) 기준으로 계속 채운다
  *************************************************/
 
@@ -63,8 +65,15 @@ const QV = (function () {
     SpreadsheetApp.getUi().showModalDialog(html, TITLE);
   }
 
+  /** 두 번째 경계 행 — 스크립트 속성 QV_LAYOUT_SWITCH_ROW_2 (없거나 숫자가 아니면 0 = 구분 없음) */
+  function switchRow2_() {
+    const n = Number(PropertiesService.getScriptProperties().getProperty('QV_LAYOUT_SWITCH_ROW_2'));
+    return (isFinite(n) && n >= QV_LAYOUT_SWITCH_ROW) ? Math.floor(n) : 0;
+  }
+
   function getPayload() {
     const ss = SpreadsheetApp.getActive();
+    const row2 = switchRow2_();
     const stRaw = PropertiesService.getUserProperties().getProperty(KEY);
     if (!stRaw) {
       return { signature: 'no_state', sheetName: SHEET, items: [] };
@@ -101,7 +110,14 @@ const QV = (function () {
 
       let blocks;
       let layout;
-      if (row >= QV_LAYOUT_SWITCH_ROW) {
+      if (row2 && row >= row2) {
+        layout = 'v2';
+        blocks = [
+          { label: 'Claude', cls: 'claude', html: cell(v, 4) },
+          { label: '합의',   cls: 'merged', html: cell(v, 5) },
+          { label: 'Gemini', cls: 'gemini', html: cell(v, 6) }
+        ].filter(b => b.html);
+      } else if (row >= QV_LAYOUT_SWITCH_ROW) {
         layout = 'new';
         blocks = [
           { label: 'Claude', cls: 'claude', html: cell(v, 4) },
@@ -138,6 +154,7 @@ const QV = (function () {
     return {
       signature,
       sheetName: sh.getName(),
+      switchRow2: row2,
       range: { startRow, endRow },
       count: items.length,
       items

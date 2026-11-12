@@ -100,6 +100,7 @@
     }
     .llmLabel.claude { background: #d97706; }
     .llmLabel.gpt    { background: #10a37f; }
+    .llmLabel.merged { background: #7c3aed; }
     .llmLabel.gemini  { background: #4285f4; }
     .llmLabel.old    { background: #6b7280; }  /* 2026-10-02 D23: 863행 이전 옛 배치(열 이름 그대로) */
 
@@ -197,7 +198,9 @@
       info.textContent = `범위 ${payload.range?.startRow ?? '?'}-${payload.range?.endRow ?? '?'} · ${payload.count ?? 0}개`;
 
       document.getElementById('leftSub').textContent = 'A(id), B(Latex)';
-      document.getElementById('rightSub').textContent = 'E(Claude) / F(GPT) / G(Gemini) · 863행 이전은 열 그대로';
+      document.getElementById('rightSub').textContent = payload.switchRow2
+        ? `E(Claude) / F(${payload.switchRow2}행부터 합의, 그 전은 GPT) / G(Gemini) · 863행 이전은 열 그대로`
+        : 'E(Claude) / F(GPT) / G(Gemini) · 863행 이전은 열 그대로';
 
       const items = payload.items || [];
 

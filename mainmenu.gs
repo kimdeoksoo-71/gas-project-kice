@@ -1,29 +1,21 @@
+/** 메뉴 (kice-2.0.0) — 검색·Token_Stat 메뉴는 기존 파일 「기출과 윤문(2011~)」에 남아 있다 */
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
-  const menu = ui.createMenu('🍋 앱 메뉴');
+  const menu = ui.createMenu('🍋 KICE 윤문');
 
-  // ---- 기타 도구 ----
-  menu.addItem('키워드검색 결과', 'sv_openSearchViewer');
-  menu.addItem('➡️ 사이드바 뷰어','showCellPreviewSidebar');
+  // ---- 윤문 ----
+  menu.addItem('▶ Que 윤문 요청', 'batch_startQueAuto');
+  menu.addItem('⏹ 중지', 'batch_stopQueAuto');
+  menu.addItem('📋 상태', 'kice_showStatus');
+
+  // ---- 보기 ----
+  menu.addSeparator();
   menu.addItem('🅰️ 아카이브 뷰어', 'qv_openDialog');
+  menu.addItem('➡️ 사이드바 뷰어', 'showCellPreviewSidebar');
 
-  // ---- 유사문항 검색과 문항별 윤문 ----
-  menu.addSeparator();
-  menu.addItem('🔍 기출 유사문항 검색 : 문항검토B2','findSimilarFromB2');
-  menu.addItem('🔑 키워드 검색 : 검색', 'searchDataLatexByKeywords');
-  
-  // ---- 문항 윤문 ----
-  menu.addSeparator();
-  menu.addItem('▶️ Que 자동윤문 시작', 'batch_startQueAuto');
-  menu.addItem('⏹️ Que 자동윤문 중지', 'batch_stopQueAuto');
-  menu.addSeparator();
-  menu.addItem('📋 KICE 자동 상태', 'kice_showStatus');
+  // ---- 프롬프트 ----
   menu.addSeparator();
   menu.addItem('✅ 현재 프롬프트를 github에 push', 'pushIndividualPromptsToGithub');
-  
-  // ---- Token 테이블 ----
-  menu.addSeparator();
-  menu.addItem('Token_Stat 만들기', 'buildTokenStatFromDataLatex');
-  
+
   menu.addToUi();
 }
