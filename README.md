@@ -6,9 +6,9 @@ KICE2011~
 | 대상 | 구글 시트 | 코드 | clasp |
 | --- | --- | --- | --- |
 | 기존 | 「기출과 윤문(2011~)」 | `kice-1.0.0` — 브랜치 `kice-1.x`, 태그 `kice-1.0.0` | 미설정(편집기에서 직접 반영) |
-| 신규 | 「KICE 윤문」(Drive `KICE윤문/`) | `kice-2.0.0` — `main`에서 개발 | 이 레포의 `.clasp.json`(신규 파일의 바운드 프로젝트) |
+| 신규 | 「KICE 윤문」(Drive `KICE윤문/`) | `kice-2.0.0` — `main`에서 개발 | 로컬 `.clasp.json`(신규 파일의 바운드 프로젝트, gitignore — 다른 GAS 레포와 같은 관례) |
 
-- **`main`의 `.clasp.json`은 신규 파일만 가리킨다.** `main`의 코드가 아직 `kice-1.0.0`인 동안에는 `clasp push`를 하지 않는다(2.0.0 코드가 준비된 뒤 첫 push).
+- **로컬 `.clasp.json`은 신규 파일만 가리킨다.** `main`의 코드가 아직 `kice-1.0.0`인 동안에는 `clasp push`를 하지 않는다(2.0.0 코드가 준비된 뒤 첫 push).
 - push 전에 라이브를 임시 폴더로 pull해 레포와 대조한다.
 - 기존 파일의 코드를 고칠 일이 생기면 브랜치 `kice-1.x`에서 고치고 편집기에 직접 반영한다.
 - 재구축 계획: 문서 레포 `kice-proofread-docs`의 `plans/2026-11-12-kice-rebuild-plan-v5.md`.
