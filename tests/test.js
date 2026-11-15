@@ -34,7 +34,7 @@ console.log('S1 인증·ping·tick(상태 없음)');
 { const { env, g } = fresh(3);
   ok('토큰 없으면 빈 응답', env.get({ cmd: 'ping' }) === null);
   ok('틀린 토큰 POST 빈 응답', env.post({ token: 'x', cmd: 'ping' }) === null);
-  ok('ping 버전', g({ cmd: 'ping' }).version === 'kice-2.0.0');
+  ok('ping 버전', g({ cmd: 'ping' }).version === 'kice-2.0.1');
   ok('tick 상태 없음 ok:false', g({ cmd: 'tick' }).ok === false);
   ok('claim 상태 없음 not_running', g({ cmd: 'claim' }).reason === 'not_running');
   ok('unknown cmd', g({ cmd: 'zz' }).ok === false);
@@ -226,6 +226,34 @@ console.log('S8 메뉴 배치(상태만) — finish 는 아카이브로 옮기�
   const sp = env.sandbox.kice_apiStop_('menu');
   const st = g({ cmd: 'status' });
   ok('메뉴 ⏹: 러너가 읽는 by=menu', sp.ok && st.state.stage === 'stopped' && st.state.by === 'menu', st.state);
+}
+
+console.log('S20 같은 submit 안의 같은 의견ID (2026-11-15 통합 시험)');
+{ const { env, g, po } = fresh(1);
+  const s = g({ cmd: 'start', keywords: '26K99', runId: 'dup-1' });
+  const c = g({ cmd: 'claim', n: '1', engineId: 'e1' }); const it = c.items[0];
+  const op = (r) => ({ id: it.id + '#aaaaaa#dup', target: 't', confidence: '규칙', category: '표기·문체', reason: r });
+  const r = po({ cmd: 'submit', runId: c.runId, startedAt: c.startedAt, row: it.row, lease: it.lease, id: it.id, cells: cellsOf(1),
+                 opinions: [op('첫째'), op('둘째'), { id: it.id + '#aaaaaa#other', target: 'u', confidence: '합의', category: '표기·문체' }], ctx: {} });
+  const rows = env.books.main.sheets.Opinions.filter(x => x[0] && x[0] !== '의견ID');
+  ok('중복 ID 는 한 줄로, 나머지도 적힌다', r.ok && !r.warn && rows.length === 2 && rows[0][7] === '둘째', { r, rows });
+}
+
+console.log('S21 뷰어 Feedback');
+{ const { env } = fresh(1);
+  const QV = env.sandbox.QV, fb = () => (env.books.main.sheets.Feedback || []).filter(x => x[0] && x[0] !== '의견ID');
+  ok('형식이 아닌 ID 거절', QV.setFeedback('abc', '채택').ok === false && QV.setFeedback('a#b#c', '보류').ok === false);
+  const a = QV.setFeedback('a#b#c', '채택', '좋음');
+  ok('채택 기록', a.ok && fb().length === 1 && fb()[0][1] === '채택' && fb()[0][2] === '좋음', fb());
+  QV.setFeedback('a#b#c', '기각');
+  ok('같은 ID 는 덮어쓴다(메모 유지)', fb().length === 1 && fb()[0][1] === '기각' && fb()[0][2] === '좋음', fb());
+  QV.setFeedback('a#b#c', '');
+  ok('판정 취소', fb().length === 1 && fb()[0][1] === '', fb());
+  ok('판정도 메모도 없으면 새 줄을 만들지 않는다', QV.setFeedback('x#y#z', '').ok && fb().length === 1);
+  env.books.main.sheets.Feedback[1][3] = '';
+  const put = env.post({ token: TOK, cmd: 'corpus_put', sheet: 'Feedback', rows: [{ '의견ID': 'a#b#c', '반영상태': '2026-11-20 ExprDict' }] });
+  ok('corpus_put 으로 반영상태 기록', put.ok && put.updated === 1 && fb()[0][3] === '2026-11-20 ExprDict', put);
+  ok('반영된 판정은 바꾸지 않는다', QV.setFeedback('a#b#c', '채택').ok === false && fb()[0][1] === '');
 }
 
 console.log(`\n결과: 통과 ${pass} / 실패 ${fail}`);

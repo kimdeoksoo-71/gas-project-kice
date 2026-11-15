@@ -28,7 +28,7 @@
  */
 
 const RAPI = {
-  VERSION:    'kice-2.0.0',
+  VERSION:    'kice-2.0.1',
   PROJECT:    'kice',
   TOKEN_PROP: 'REMOTE_TOKEN',
   LOG_TAIL:   20,

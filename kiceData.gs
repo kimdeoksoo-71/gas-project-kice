@@ -16,7 +16,7 @@ var KDATA_PAGE_MAX     = 500;
 var KDATA_ETAG_PROP    = 'KDATA_ETAG';                 // corpus_put 이 쓸 때마다 갱신
 var KDATA_IMAGE_MAX    = 8 * 1024 * 1024;              // image 한 장 상한 (base64 전 바이트)
 var KDATA_READ_SHEETS  = ['Corpus', 'ExprDict', 'AnswerKey', 'EvalSet', 'Feedback', 'Opinions', 'QueCtx'];
-var KDATA_PUT_SHEETS   = { Corpus: '문항ID', AnswerKey: '문항ID', ExprDict: '표현', EvalSet: '문항ID' };   // 시트 → 키 열
+var KDATA_PUT_SHEETS   = { Corpus: '문항ID', AnswerKey: '문항ID', ExprDict: '표현', EvalSet: '문항ID', Feedback: '의견ID' };   // 시트 → 키 열
 var KDATA_LOCK_HEADER  = '잠금';
 var KDATA_LOCKED_COLS  = ['LaTeX', '정답', '대단원'];  // 잠금 행에서 force 없이는 못 바꾸는 열 (v5 §18 N13)
 var KDATA_RULE_SHEET   = 'Rule';
@@ -215,7 +215,7 @@ function kdata_apiDsread_(p) {
 
 /* =========================================================
  * corpus_put (POST) — 키 기준 upsert (v5 §17 S3)
- *   sheet  : Corpus | AnswerKey | ExprDict | EvalSet
+ *   sheet  : Corpus | AnswerKey | ExprDict | EvalSet | Feedback(반영상태를 적는 데 쓴다 — 2.0.1)
  *   rows   : [{헤더 이름: 값, …}]  — 키 열(Corpus·AnswerKey·EvalSet = 문항ID, ExprDict = 표현)은 필수. 200행 이내
  *   force  : true 면 잠금 행의 보호 열도 바꾼다
  *   dryRun : true 면 쓰지 않고 바뀔 행 수만 돌려준다

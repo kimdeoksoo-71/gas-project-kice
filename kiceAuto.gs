@@ -871,8 +871,9 @@ function kice_upsertOpinions_(ss, itemId, opinions) {
       var val = (field === 'itemId' && (o[field] === undefined || o[field] === null)) ? itemId : o[field];
       if (val !== undefined && val !== null) rowVals[col - 1] = kice_clip_(typeof val === 'object' ? JSON.stringify(val) : val);
     }
-    if (index[oid]) sh.getRange(index[oid], 1, 1, width).setValues([rowVals]);
-    else { index[oid] = -1; appendRows.push(rowVals); }
+    if (index[oid] > 0) sh.getRange(index[oid], 1, 1, width).setValues([rowVals]);
+    else if (index[oid] < 0) { appendRows[-index[oid] - 1] = rowVals; return; }   // 같은 submit 안의 같은 의견ID — 뒤의 것으로 바꾼다 (2026-11-15 통합 시험)
+    else { appendRows.push(rowVals); index[oid] = -appendRows.length; }
     n++;
   });
   if (appendRows.length) {

@@ -38,7 +38,7 @@ function makeEnv(repo) {
     console: { log: () => {} }, JSON, Math, Date: class extends Date { constructor(...a) { if (a.length) super(...a); else super(clock); } static now() { return clock; } },
     PropertiesService: { getScriptProperties: () => ({ getProperty: k => (k in props ? props[k] : null), setProperty: (k, v) => { props[k] = String(v); }, deleteProperty: k => { delete props[k]; } }),
                          getUserProperties: () => ({ getProperty: () => null, setProperty: () => {} }) },
-    LockService: { getScriptLock: () => ({ tryLock: () => { if (lockFail || lockHeld) return false; lockHeld = true; return true; }, releaseLock: () => { lockHeld = false; } }) },
+    LockService: { getDocumentLock: () => ({ tryLock: () => true, releaseLock: () => {} }), getScriptLock: () => ({ tryLock: () => { if (lockFail || lockHeld) return false; lockHeld = true; return true; }, releaseLock: () => { lockHeld = false; } }) },
     SpreadsheetApp: { getActive: () => Book('main'), openById: (id) => { if (!books[id]) throw new Error('no ss ' + id); return Book(id); }, flush: () => {}, getUi: () => { throw new Error('no ui'); } },
     Utilities: { getUuid: () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, () => Math.floor(Math.random() * 16).toString(16)), base64Encode: () => 'BASE64' },
     ContentService: { createTextOutput: (s) => ({ _t: s, setMimeType() { return this; } }), MimeType: { JSON: 'json' } },

@@ -102,6 +102,15 @@
     .llmLabel.gpt    { background: #10a37f; }
     .llmLabel.merged { background: #7c3aed; }
     .llmLabel.gemini  { background: #4285f4; }
+    .op { padding: 6px 0; }
+    .op + .op { border-top: 1px dashed #d1d5db; margin-top: 6px; }
+    .fb { margin-top: 6px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .fb button { font-size: 12px; padding: 3px 10px; border: 1px solid #9ca3af; border-radius: 6px; background: #fff; cursor: pointer; }
+    .fb button.on.acc { background: #16a34a; border-color: #16a34a; color: #fff; }
+    .fb button.on.rej { background: #dc2626; border-color: #dc2626; color: #fff; }
+    .fb button:disabled { opacity: .5; cursor: default; }
+    .fb input { font-size: 12px; padding: 3px 6px; border: 1px solid #d1d5db; border-radius: 6px; flex: 1; min-width: 120px; }
+    .fb .fbMsg { font-size: 11px; color: #6b7280; }
     .llmLabel.old    { background: #6b7280; }  /* 2026-10-02 D23: 863행 이전 옛 배치(열 이름 그대로) */
 
     .rightBody a {
@@ -176,12 +185,70 @@
       targets.forEach(el => { if (el) renderMathInElement(el, KATEX_OPTS); });
     }
 
-    function renderLlmBlock(label, cssClass, html) {
+    let FB = {};                                   // 의견ID → {verdict, memo, applied}
+
+    function fbControls(id) {
+      const f = FB[id] || {};
+      const dis = f.applied ? 'disabled' : '';
+      return `
+        <div class="fb" data-id="${escapeHtml(id)}">
+          <button class="acc ${f.verdict === '채택' ? 'on' : ''}" ${dis} onclick="fbClick(this,'채택')">채택</button>
+          <button class="rej ${f.verdict === '기각' ? 'on' : ''}" ${dis} onclick="fbClick(this,'기각')">기각</button>
+          <input type="text" placeholder="메모(선택)" value="${escapeHtml(f.memo || '').replace(/"/g, '&quot;')}" ${dis} onchange="fbMemo(this)">
+          <span class="fbMsg">${f.applied ? '반영됨: ' + escapeHtml(f.applied) : ''}</span>
+        </div>
+      `;
+    }
+
+    // v2 셀: 의견은 <br><br> 로 나뉘고 저마다 [[ID]] 줄이 있다. 의견마다 채택/기각을 붙인다.
+    function withFeedback(html) {
+      return String(html).split('<br><br>').map(part => {
+        const m = part.match(/\[\[ID\]\]\s*([^<\n]+)/);
+        return `<div class="op">${part}${m ? fbControls(m[1].trim()) : ''}</div>`;
+      }).join('');
+    }
+
+    function fbSync(id) {                          // 같은 의견이 E·F·G 에 함께 보일 수 있다 — 모두 맞춘다
+      const f = FB[id] || {};
+      document.querySelectorAll('.fb').forEach(el => {
+        if (el.dataset.id !== id) return;
+        el.querySelector('.acc').classList.toggle('on', f.verdict === '채택');
+        el.querySelector('.rej').classList.toggle('on', f.verdict === '기각');
+        el.querySelector('input').value = f.memo || '';
+      });
+    }
+
+    function fbSend(el, verdict, memo) {
+      const box = el.closest('.fb'), id = box.dataset.id, msg = box.querySelector('.fbMsg');
+      msg.textContent = '기록 중…';
+      google.script.run
+        .withSuccessHandler(r => {
+          if (!r || !r.ok) { msg.textContent = '실패: ' + ((r && r.reason) || '?'); return; }
+          FB[id] = Object.assign({}, FB[id], { verdict: r.verdict, memo: r.memo });
+          fbSync(id);
+          msg.textContent = r.verdict ? '기록됨' : '판정 취소';
+        })
+        .withFailureHandler(e => { msg.textContent = '실패: ' + (e && e.message || e); })
+        .qv_setFeedback(id, verdict, memo);
+    }
+
+    function fbClick(btn, verdict) {               // 켜진 버튼을 다시 누르면 판정 취소
+      const box = btn.closest('.fb');
+      fbSend(btn, btn.classList.contains('on') ? '' : verdict, box.querySelector('input').value);
+    }
+
+    function fbMemo(input) {
+      const box = input.closest('.fb');
+      const f = FB[box.dataset.id] || {};
+      fbSend(input, f.verdict || '', input.value);
+    }
+
+    function renderLlmBlock(label, cssClass, html, v2) {
       if (!html) return '';
       return `
         <div class="rightBody">
           <div><span class="llmLabel ${cssClass}">${label}</span></div>
-          <div>${html}</div>
+          <div>${v2 ? withFeedback(html) : html}</div>
         </div>
       `;
     }
@@ -203,6 +270,7 @@
         : 'E(Claude) / F(GPT) / G(Gemini) · 863행 이전은 열 그대로';
 
       const items = payload.items || [];
+      FB = payload.feedback || {};
 
       if (!items.length) {
         document.getElementById('leftList').innerHTML = `<div class="empty">(출력할 행이 없음)</div>`;
@@ -231,7 +299,7 @@
       const rightHtml = items.map(it => {
         const idLine = escapeHtml(it.id || '(id 없음)');
         const blocks = (Array.isArray(it.blocks)                     // 2026-10-02 D23: 행별 blocks 우선
-          ? it.blocks.map(b => renderLlmBlock(b.label, b.cls, b.html))
+          ? it.blocks.map(b => renderLlmBlock(b.label, b.cls, b.html, it.layout === 'v2'))
           : [
               renderLlmBlock('Claude', 'claude', it.claude),
               renderLlmBlock('GPT', 'gpt', it.gpt),

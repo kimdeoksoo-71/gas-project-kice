@@ -9,6 +9,7 @@
  *     row <  864: D~G 중 값이 있는 열을 "D열(옛)" 처럼 열 이름 그대로 표시 (회사 이름을 추측해 붙이지 않음)
  *     row ≥ 속성 QV_LAYOUT_SWITCH_ROW_2: E/F/G 를 Claude / 합의 / Gemini 로 표시 (kice-2.0.0 — F열의 뜻이 GPT 에서 합의로 바뀐 경계.
  *         전환 때 아카이브 증분 복사를 마친 뒤 마지막 행 + 1 을 스크립트 속성에 적는다. 속성이 없으면 이 구분은 쓰지 않는다)
+ * - v2 행은 의견마다 채택/기각 버튼을 붙인다. 판정은 Feedback 시트에만 적는다 (셀은 고치지 않는다 — v5 §8-4)
  * - 호환: 예전 필드 claude/gpt/gemini 도 새 배치(E/F/G) 기준으로 계속 채운다
  *************************************************/
 
@@ -155,14 +156,76 @@ const QV = (function () {
       signature,
       sheetName: sh.getName(),
       switchRow2: row2,
+      feedback: feedbackFor_(ss, items),
       range: { startRow, endRow },
       count: items.length,
       items
     };
   }
 
-  return { openDialog, getPayload };
+  /* ---------- Feedback (v5 §8-4, 부록 A-8) ----------
+   * 셀은 제출 뒤 고치지 않는다. 채택/기각은 Feedback 시트(의견ID · 판정 · 메모 · 반영상태)에만 적는다. */
+  const FB_SHEET = 'Feedback';
+  const FB_HEADERS = ['의견ID', '판정', '메모', '반영상태'];
+  const FB_VERDICTS = ['채택', '기각', ''];
+  const ID_RE = /\[\[ID\]\]\s*([^<\n]+)/g;
+
+  function fbSheet_(ss) {
+    const sh = ss.getSheetByName(FB_SHEET) || ss.insertSheet(FB_SHEET);
+    if (sh.getLastRow() < 1) sh.getRange(1, 1, 1, FB_HEADERS.length).setValues([FB_HEADERS]);
+    return sh;
+  }
+
+  /** 보이는 행들의 의견ID 에 대한 판정 {의견ID: {verdict, memo, applied}} */
+  function feedbackFor_(ss, items) {
+    const want = {};
+    items.forEach(it => {
+      if (it.layout !== 'v2') return;
+      it.blocks.forEach(b => { let m; ID_RE.lastIndex = 0; while ((m = ID_RE.exec(b.html))) want[m[1].trim()] = true; });
+    });
+    const out = {};
+    if (!Object.keys(want).length) return out;
+    const sh = ss.getSheetByName(FB_SHEET);
+    if (!sh || sh.getLastRow() < 2) return out;
+    sh.getRange(2, 1, sh.getLastRow() - 1, 4).getValues().forEach(r => {
+      const id = String(r[0] || '').trim();
+      if (id && want[id]) out[id] = { verdict: String(r[1] || ''), memo: String(r[2] || ''), applied: String(r[3] || '') };
+    });
+    return out;
+  }
+
+  /** 의견 하나의 판정을 적는다. verdict = '채택' | '기각' | ''(판정 취소). 이미 반영된 판정은 바꾸지 않는다. */
+  function setFeedback(id, verdict, memo) {
+    id = String(id || '').trim();
+    verdict = String(verdict || '');
+    if (!id || id.split('#').length !== 3) return { ok: false, reason: '의견ID 형식이 아닙니다' };
+    if (FB_VERDICTS.indexOf(verdict) < 0) return { ok: false, reason: '판정은 채택·기각만' };
+    const lock = LockService.getDocumentLock();
+    if (!lock.tryLock(10000)) return { ok: false, reason: '다른 기록이 진행 중입니다. 다시 눌러 주세요' };
+    try {
+      const sh = fbSheet_(SpreadsheetApp.getActive());
+      const last = sh.getLastRow();
+      let row = 0, cur = null;
+      if (last >= 2) {
+        const vals = sh.getRange(2, 1, last - 1, 4).getValues();
+        for (let i = 0; i < vals.length; i++) if (String(vals[i][0] || '').trim() === id) { row = i + 2; cur = vals[i]; break; }
+      }
+      if (cur && String(cur[3] || '').trim()) return { ok: false, reason: '이미 반영된 판정입니다(' + cur[3] + ')' };
+      const m = (memo === undefined || memo === null) ? (cur ? String(cur[2] || '') : '') : String(memo).slice(0, 2000);
+      if (row) sh.getRange(row, 2, 1, 2).setValues([[verdict, m]]);
+      else if (verdict || m) sh.getRange(Math.max(2, last + 1), 1, 1, 4).setValues([[id, verdict, m, '']]);
+      return { ok: true, id: id, verdict: verdict, memo: m };
+    } finally {
+      lock.releaseLock();
+    }
+  }
+
+  return { openDialog, getPayload, setFeedback };
 })();
+
+function qv_setFeedback(id, verdict, memo) {
+  return QV.setFeedback(id, verdict, memo);
+}
 
 function qv_openDialog() {
   QV.openDialog();
