@@ -183,6 +183,11 @@ const QV = (function () {
       if (it.layout !== 'v2') return;
       it.blocks.forEach(b => { let m; ID_RE.lastIndex = 0; while ((m = ID_RE.exec(b.html))) want[m[1].trim()] = true; });
     });
+    return feedbackByIds_(ss, want);
+  }
+
+  /** want = {의견ID: true} → {의견ID: {verdict, memo, applied}}. 사이드바(사이드바로보기.gs)도 쓴다. */
+  function feedbackByIds_(ss, want) {
     const out = {};
     if (!Object.keys(want).length) return out;
     const sh = ss.getSheetByName(FB_SHEET);
@@ -220,7 +225,7 @@ const QV = (function () {
     }
   }
 
-  return { openDialog, getPayload, setFeedback };
+  return { openDialog, getPayload, setFeedback, feedbackByIds: (want) => feedbackByIds_(SpreadsheetApp.getActive(), want) };
 })();
 
 function qv_setFeedback(id, verdict, memo) {

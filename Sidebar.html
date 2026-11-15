@@ -51,6 +51,15 @@
         background: #e0e0e0;
         margin: 20px 0;
       }
+      .op { padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px dotted #ddd; }
+      .op:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
+      .fb { margin-top: 6px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+      .fb button { font-size: 12px; padding: 3px 10px; border: 1px solid #9ca3af; border-radius: 6px; background: #fff; cursor: pointer; }
+      .fb button.on.acc { background: #16a34a; border-color: #16a34a; color: #fff; }
+      .fb button.on.rej { background: #dc2626; border-color: #dc2626; color: #fff; }
+      .fb button:disabled { opacity: .5; cursor: default; }
+      .fb input { font-size: 12px; padding: 3px 6px; border: 1px solid #d1d5db; border-radius: 6px; flex: 1; min-width: 90px; }
+      .fb .fbMsg { font-size: 11px; color: #6b7280; width: 100%; }
       #loading { color: #999; text-align: center; display: block; margin-top: 20px; }
     </style>
   </head>
@@ -81,11 +90,81 @@
         targets.forEach(el => { if (el) renderMathInElement(el, KATEX_OPTS); });
       }
 
+      // ── 의견별 채택/기각 (아카이브 뷰어와 같은 Feedback 시트, 같은 서버 함수 qv_setFeedback) ──
+      let FB = {};                                   // 의견ID → {verdict, memo, applied}
+      let lastSig = null, busy = 0;
+      function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+      function fbControls(id) {
+        const f = FB[id] || {};
+        const dis = f.applied ? 'disabled' : '';
+        return `
+          <div class="fb" data-id="${esc(id)}">
+            <button class="acc ${f.verdict === '채택' ? 'on' : ''}" ${dis} onclick="fbClick(this,'채택')">채택</button>
+            <button class="rej ${f.verdict === '기각' ? 'on' : ''}" ${dis} onclick="fbClick(this,'기각')">기각</button>
+            <input type="text" placeholder="메모(선택)" value="${esc(f.memo || '')}" ${dis} onchange="fbMemo(this)">
+            <span class="fbMsg">${f.applied ? '반영됨: ' + esc(f.applied) : ''}</span>
+          </div>`;
+      }
+
+      // 의견 셀: 의견은 빈 줄로 나뉘고 저마다 [[ID]] 줄이 있다. ID 가 있는 의견에만 버튼을 붙인다.
+      function cellHtml(value) {
+        if (!value) return '<span style="color:#ccc">빈 셀</span>';
+        if (value.indexOf('[[ID]]') < 0) return value.replace(/\n/g, '<br>');
+        return value.split(/\n{2,}/).map(part => {
+          const m = part.match(/\[\[ID\]\][ \t]*([^\n]+)/);
+          const id = m ? m[1].trim() : '';
+          return `<div class="op">${part.replace(/\n/g, '<br>')}${id && id.split('#').length === 3 ? fbControls(id) : ''}</div>`;
+        }).join('');
+      }
+
+      function fbSync(id) {                          // 같은 의견이 E·F·G 에 함께 보일 수 있다 — 모두 맞춘다
+        const f = FB[id] || {};
+        document.querySelectorAll('.fb').forEach(el => {
+          if (el.dataset.id !== id) return;
+          el.querySelector('.acc').classList.toggle('on', f.verdict === '채택');
+          el.querySelector('.rej').classList.toggle('on', f.verdict === '기각');
+          el.querySelector('input').value = f.memo || '';
+        });
+      }
+
+      function fbSend(el, verdict, memo) {
+        const box = el.closest('.fb'), id = box.dataset.id;
+        const say = (t) => document.querySelectorAll('.fb').forEach(b => { if (b.dataset.id === id) b.querySelector('.fbMsg').textContent = t; });
+        say('기록 중…'); busy++;
+        google.script.run
+          .withSuccessHandler(r => {
+            busy--;
+            if (!r || !r.ok) { say('실패: ' + ((r && r.reason) || '?')); return; }
+            FB[id] = Object.assign({}, FB[id], { verdict: r.verdict, memo: r.memo });
+            fbSync(id);
+            say(r.verdict ? '기록됨' : '판정 취소');
+            lastSig = null;                          // 다음 조회에서 서버 값으로 다시 맞춘다
+          })
+          .withFailureHandler(e => { busy--; say('실패: ' + (e && e.message || e)); })
+          .qv_setFeedback(id, verdict, memo);
+      }
+
+      function fbClick(btn, verdict) {               // 켜진 버튼을 다시 누르면 판정 취소
+        const box = btn.closest('.fb');
+        fbSend(btn, btn.classList.contains('on') ? '' : verdict, box.querySelector('input').value);
+      }
+
+      function fbMemo(input) {
+        const f = FB[input.closest('.fb').dataset.id] || {};
+        fbSend(input, f.verdict || '', input.value);
+      }
+
       function renderRange(res) {
         const container = document.getElementById('container');
-        
-        // 선택 범위가 이전과 같고 내용도 같다면 굳이 다시 그리지 않음 (깜빡임 방지)
-        const currentRange = res.sheetName + "!" + res.rangeAddress;
+
+        // 2초마다 다시 그리면 입력 중인 메모와 "기록됨" 표시가 지워진다 →
+        // 내용·판정이 그대로면 그리지 않고, 메모 입력 중이거나 기록 요청이 가는 중에도 그리지 않는다.
+        const sig = JSON.stringify([res.sheetName, res.rangeAddress, res.contents, res.feedback || {}]);
+        const ae = document.activeElement;
+        if (sig === lastSig || busy > 0 || (ae && ae.closest && ae.closest('.fb') && ae.tagName === 'INPUT')) return;
+        lastSig = sig;
+        FB = res.feedback || {};
         
         // 컨텐츠 생성
         let htmlBuffer = "";
@@ -94,7 +173,7 @@
             <div class="cell-item">
               <span class="cell-address">${item.address}</span>
               <div class="cell-content">
-                ${item.value.replace(/\n/g, '<br>') || '<span style="color:#ccc">빈 셀</span>'}
+                ${cellHtml(item.value)}
               </div>
             </div>
           `;

@@ -34,7 +34,7 @@ console.log('S1 인증·ping·tick(상태 없음)');
 { const { env, g } = fresh(3);
   ok('토큰 없으면 빈 응답', env.get({ cmd: 'ping' }) === null);
   ok('틀린 토큰 POST 빈 응답', env.post({ token: 'x', cmd: 'ping' }) === null);
-  ok('ping 버전', g({ cmd: 'ping' }).version === 'kice-2.0.1');
+  ok('ping 버전', g({ cmd: 'ping' }).version === 'kice-2.0.2');
   ok('tick 상태 없음 ok:false', g({ cmd: 'tick' }).ok === false);
   ok('claim 상태 없음 not_running', g({ cmd: 'claim' }).reason === 'not_running');
   ok('unknown cmd', g({ cmd: 'zz' }).ok === false);
@@ -254,6 +254,31 @@ console.log('S21 뷰어 Feedback');
   const put = env.post({ token: TOK, cmd: 'corpus_put', sheet: 'Feedback', rows: [{ '의견ID': 'a#b#c', '반영상태': '2026-11-20 ExprDict' }] });
   ok('corpus_put 으로 반영상태 기록', put.ok && put.updated === 1 && fb()[0][3] === '2026-11-20 ExprDict', put);
   ok('반영된 판정은 바꾸지 않는다', QV.setFeedback('a#b#c', '채택').ok === false && fb()[0][1] === '');
+}
+
+console.log('S22 사이드바 Feedback 조회');
+{ const { env } = fresh(1);
+  const QV = env.sandbox.QV;
+  QV.setFeedback('a#b#c', '채택', 'm'); QV.setFeedback('d#e#f', '기각');
+  const r = QV.feedbackByIds({ 'a#b#c': true, 'q#q#q': true });
+  ok('요청한 ID 만 돌려준다', Object.keys(r).length === 1 && r['a#b#c'].verdict === '채택' && r['a#b#c'].memo === 'm' && r['a#b#c'].applied === '', r);
+  ok('ID 가 없으면 빈 객체', Object.keys(QV.feedbackByIds({})).length === 0);
+  const fs = require('fs'), vm = require('vm'), path = require('path');
+  let synOk = true, why = '';
+  try {
+    new vm.Script(fs.readFileSync(path.join(REPO, '사이드바로보기.gs'), 'utf8'));
+    const html = fs.readFileSync(path.join(REPO, 'Sidebar.html'), 'utf8');
+    const js = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+    new vm.Script(js);
+    // cellHtml 을 실제로 돌려 본다 (DOM·google 없이)
+    const sb = { document: { getElementById: () => ({}), querySelectorAll: () => [] }, google: { script: { run: { withSuccessHandler: () => ({ getActiveRangeContents: () => {} }) } } }, setInterval: () => {}, setTimeout: () => {}, window: {} };
+    vm.createContext(sb); vm.runInContext(js + '\nthis.cellHtml = cellHtml; this.setFB = (x) => { FB = x; };', sb);
+    sb.setFB({ 'a#b#c': { verdict: '채택', memo: '', applied: '' } });
+    const h = sb.cellHtml('[합의] x\n[[ID]] a#b#c\n[[원본]] p\n\n[[ID]] 규칙없음\n[[원본]] q');
+    if ((h.match(/class="fb"/g) || []).length !== 1 || h.indexOf('acc on') < 0 || (h.match(/class="op"/g) || []).length !== 2) { synOk = false; why = h; }
+    if (sb.cellHtml('그냥 $x$\n둘째 줄') !== '그냥 $x$<br>둘째 줄') { synOk = false; why = 'plain'; }
+  } catch (e) { synOk = false; why = String(e); }
+  ok('사이드바 스크립트 구문·의견별 버튼(ID 형식인 의견에만)', synOk, why);
 }
 
 console.log(`\n결과: 통과 ${pass} / 실패 ${fail}`);
