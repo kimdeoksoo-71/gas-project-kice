@@ -276,6 +276,15 @@ console.log('S22 사이드바 Feedback 조회');
     sb.setFB({ 'a#b#c': { verdict: '채택', memo: '', applied: '' } });
     const h = sb.cellHtml('[합의] x\n[[ID]] a#b#c\n[[원본]] p\n\n[[ID]] 규칙없음\n[[원본]] q');
     if ((h.match(/class="fb"/g) || []).length !== 1 || h.indexOf('acc on') < 0 || (h.match(/class="op"/g) || []).length !== 2) { synOk = false; why = h; }
+    const real = '2021-06-C-12<br>[[ID]] K_1공통14#da56fd#1210b749<br>[[분류]] 표기·문체<br>[[이유]] &#x27;~일 때&#x27;<br>[[힌트]] 없음<br><br>2025-11-C-22<br>[[ID]] K_1공통22#7ba1ee#dbd3f72d<br>[[원본]] p';
+    const h2 = sb.cellHtml(real);
+    if ((h2.match(/class="fb"/g) || []).length !== 2 || h2.indexOf('data-id="K_1공통14#da56fd#1210b749"') < 0 || h2.indexOf('data-id="K_1공통22#7ba1ee#dbd3f72d"') < 0) { synOk = false; why = h2; }
+    const gs = {}; vm.createContext(gs); vm.runInContext(fs.readFileSync(path.join(REPO, '사이드바로보기.gs'), 'utf8'), gs);
+    let got = null;
+    gs.QV = { feedbackByIds: (w) => { got = Object.keys(w); return {}; } };
+    gs.SpreadsheetApp = { getActiveSheet: () => ({ getName: () => 's', getActiveRange: () => ({ getDisplayValues: () => [[real]], getRow: () => 1, getColumn: () => 1, getA1Notation: () => 'A1' }), getRange: () => ({ getA1Notation: () => 'A1' }) }) };
+    gs.getActiveRangeContents();
+    if (!got || got.length !== 2 || got[0] !== 'K_1공통14#da56fd#1210b749') { synOk = false; why = JSON.stringify(got); }
     if (sb.cellHtml('그냥 $x$\n둘째 줄') !== '그냥 $x$<br>둘째 줄') { synOk = false; why = 'plain'; }
   } catch (e) { synOk = false; why = String(e); }
   ok('사이드바 스크립트 구문·의견별 버튼(ID 형식인 의견에만)', synOk, why);

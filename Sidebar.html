@@ -107,12 +107,13 @@
           </div>`;
       }
 
-      // 의견 셀: 의견은 빈 줄로 나뉘고 저마다 [[ID]] 줄이 있다. ID 가 있는 의견에만 버튼을 붙인다.
+      // 의견 셀: 의견은 빈 줄(<br><br>)로 나뉘고 저마다 [[ID]] 줄이 있다. ID 가 있는 의견에만 버튼을 붙인다.
       function cellHtml(value) {
         if (!value) return '<span style="color:#ccc">빈 셀</span>';
         if (value.indexOf('[[ID]]') < 0) return value.replace(/\n/g, '<br>');
-        return value.split(/\n{2,}/).map(part => {
-          const m = part.match(/\[\[ID\]\][ \t]*([^\n]+)/);
+        // 의견 셀은 줄바꿈이 <br> 글자로 들어 있다(엔진·GAS 가 그렇게 쓴다). 줄바꿈 문자로 된 셀도 받는다.
+        return value.split(/(?:<br>\s*<br>|\n{2,})/).map(part => {
+          const m = part.match(/\[\[ID\]\][ \t]*([^\n<]+)/);
           const id = m ? m[1].trim() : '';
           return `<div class="op">${part.replace(/\n/g, '<br>')}${id && id.split('#').length === 3 ? fbControls(id) : ''}</div>`;
         }).join('');
