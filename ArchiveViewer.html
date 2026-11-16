@@ -200,11 +200,29 @@
       `;
     }
 
+    // ── 기출 사례 보기: [[사례]] 줄(문항ID 목록)을 새 탭 링크로 바꾼다 (kice-2.0.3, RefViewer) ──
+    let REFS = { url: '', t: '' };
+    function refsUnesc(s) { return String(s).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, '&'); }
+    function refsLink(part) {
+      return String(part).replace(/\[\[사례\]\][ \t]*([^<\n]*)/, (all, body) => {
+        const ids = body.match(/\d{4}-\d{2}-[A-Za-z]+-\d+/g) || [];
+        if (!ids.length) return all;
+        const more = (body.match(/\(외 \d+\)/) || [''])[0];
+        if (!REFS.url) return `[[사례]] 기출 ${ids.length}문항 ${more}`;
+        const groups = [], at = {};                       // 주소를 줄인다: 2025-09-C.11.15~2025-06-P.27
+        ids.forEach(id => { const k = id.lastIndexOf('-'), p = id.slice(0, k); if (!(p in at)) { at[p] = groups.length; groups.push([p]); } groups[at[p]].push(id.slice(k + 1)); });
+        const m = String(part).match(/\[\[수정\]\][ \t]*([^<\n]*)/);
+        const href = REFS.url + (REFS.url.indexOf('?') < 0 ? '?' : '&') + 'view=refs&t=' + encodeURIComponent(REFS.t) + '&ids=' + groups.map(g => g.join('.')).join('~')
+          + '&q=' + encodeURIComponent(m ? refsUnesc(m[1]).slice(0, 80) : '');
+        return `[[사례]] <a class="refs" href="${href}" target="_blank" rel="noopener">기출 ${ids.length}문항 보기</a> ${more}`;
+      });
+    }
+
     // v2 셀: 의견은 <br><br> 로 나뉘고 저마다 [[ID]] 줄이 있다. 의견마다 채택/기각을 붙인다.
     function withFeedback(html) {
       return String(html).split('<br><br>').map(part => {
         const m = part.match(/\[\[ID\]\]\s*([^<\n]+)/);
-        return `<div class="op">${part}${m ? fbControls(m[1].trim()) : ''}</div>`;
+        return `<div class="op">${refsLink(part)}${m ? fbControls(m[1].trim()) : ''}</div>`;
       }).join('');
     }
 
@@ -271,6 +289,7 @@
 
       const items = payload.items || [];
       FB = payload.feedback || {};
+      if (payload.refs && payload.refs.url) REFS = payload.refs;
 
       if (!items.length) {
         document.getElementById('leftList').innerHTML = `<div class="empty">(출력할 행이 없음)</div>`;

@@ -42,10 +42,13 @@ function makeEnv(repo) {
     SpreadsheetApp: { getActive: () => Book('main'), openById: (id) => { if (!books[id]) throw new Error('no ss ' + id); return Book(id); }, flush: () => {}, getUi: () => { throw new Error('no ui'); } },
     Utilities: { getUuid: () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, () => Math.floor(Math.random() * 16).toString(16)), base64Encode: () => 'BASE64' },
     ContentService: { createTextOutput: (s) => ({ _t: s, setMimeType() { return this; } }), MimeType: { JSON: 'json' } },
-    ScriptApp: { getProjectTriggers: () => [] }, DriveApp: {}, HtmlService: {},
+    ScriptApp: { getProjectTriggers: () => [], getService: () => ({ getUrl: () => 'https://script.test/exec' }) },
+    DriveApp: { getFileById: (id) => ({ getMimeType: () => 'image/png', getSize: () => 10, getName: () => id + '.png', getBlob: () => ({ getBytes: () => [1] }) }) },
+    HtmlService: { createHtmlOutput: (h) => ({ _html: h, setTitle() { return this; } }),
+                   createTemplateFromFile: (f) => ({ evaluate() { return { _tpl: f, _boot: this.boot, setTitle() { return this; } }; } }) },
   };
   vm.createContext(sandbox);
-  ['kiceAuto.gs', 'kiceData.gs', 'batchKiceMulti.gs', 'RemoteApi.gs', 'ArchieveViewer.gs', 'mainmenu.gs'].forEach(f => {
+  ['kiceAuto.gs', 'kiceData.gs', 'batchKiceMulti.gs', 'RemoteApi.gs', 'ArchieveViewer.gs', 'mainmenu.gs', 'RefViewer.gs'].forEach(f => {
     let src = fs.readFileSync(path.join(repo, f), 'utf8').replace(/^const (RAPI|QV) =/m, 'var $1 =');
     vm.runInContext(src, sandbox, { filename: f });
   });

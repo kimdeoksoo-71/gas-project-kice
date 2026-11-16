@@ -157,6 +157,7 @@ const QV = (function () {
       sheetName: sh.getName(),
       switchRow2: row2,
       feedback: feedbackFor_(ss, items),
+      refs: (function () { try { return kv_base_(); } catch (e) { return { url: '', t: '' }; } })(),
       range: { startRow, endRow },
       count: items.length,
       items

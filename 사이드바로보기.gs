@@ -38,8 +38,12 @@ function getActiveRangeContents() {
   let feedback = {};
   try { feedback = QV.feedbackByIds(want); } catch (e) { feedback = {}; }
 
+  let refs = { url: '', t: '' };                       // 「사례 보기」 링크의 바탕 (RefViewer.gs)
+  try { refs = kv_base_(); } catch (e) {}
+
   return {
     feedback: feedback,
+    refs: refs,
     contents: contents,
     sheetName: sheet.getName(),
     rangeAddress: range.getA1Notation()

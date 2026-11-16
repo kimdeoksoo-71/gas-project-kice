@@ -34,7 +34,7 @@ console.log('S1 인증·ping·tick(상태 없음)');
 { const { env, g } = fresh(3);
   ok('토큰 없으면 빈 응답', env.get({ cmd: 'ping' }) === null);
   ok('틀린 토큰 POST 빈 응답', env.post({ token: 'x', cmd: 'ping' }) === null);
-  ok('ping 버전', g({ cmd: 'ping' }).version === 'kice-2.0.2');
+  ok('ping 버전', g({ cmd: 'ping' }).version === 'kice-2.0.3');
   ok('tick 상태 없음 ok:false', g({ cmd: 'tick' }).ok === false);
   ok('claim 상태 없음 not_running', g({ cmd: 'claim' }).reason === 'not_running');
   ok('unknown cmd', g({ cmd: 'zz' }).ok === false);
@@ -288,6 +288,53 @@ console.log('S22 사이드바 Feedback 조회');
     if (sb.cellHtml('그냥 $x$\n둘째 줄') !== '그냥 $x$<br>둘째 줄') { synOk = false; why = 'plain'; }
   } catch (e) { synOk = false; why = String(e); }
   ok('사이드바 스크립트 구문·의견별 버튼(ID 형식인 의견에만)', synOk, why);
+}
+
+console.log('S23 기출 사례 보기 (RefViewer)');
+{ const { env } = fresh(1);
+  const S = env.sandbox, fs = require('fs'), vm = require('vm'), path = require('path');
+  env.books.main.sheets.Corpus = [['문항ID', '출제연도', '시험', '과목', '번호', '통이미지 링크'],
+    ['2025-09-C-11', 2025, '9월 모평', '공통', 11, 'https://drive.google.com/file/d/' + 'A'.repeat(30) + '/view'],
+    ['2024-06-P-27', 2024, '6월 모평', '확통', 27, '']];
+  const base = S.kv_base_();
+  ok('바탕: 웹앱 주소와 표', base.url === 'https://script.test/exec' && base.t.length === 32 && S.kv_base_().t === base.t, base);
+  ok('표 없이는 화면을 주지 않는다', /만료/.test(S.doGet({ parameter: { view: 'refs', t: 'x', ids: '2025-09-C.11' } })._html || ''));
+  const pg = S.doGet({ parameter: { view: 'refs', t: base.t, ids: '2025-09-C.11.15~2024-06-P.27~bad', q: '</script>' } });
+  const boot = JSON.parse(pg._boot || '{}');
+  ok('화면: 묶은 주소를 문항ID 로 편다', pg._tpl === 'RefViewerPage' && JSON.stringify(boot.ids) === '["2025-09-C-11","2025-09-C-15","2024-06-P-27"]' && pg._boot.indexOf('</script>') < 0, pg);
+  ok('view 가 없으면 전과 같다(토큰 없으면 빈 응답)', env.get({ cmd: 'ping' }) === null);
+  const m = S.kv_refMeta(base.t, ['2025-09-C-11', '2024-06-P-27', '없는ID']);
+  ok('목록: 시험 이름과 이미지 유무', m.ok && m.items[0].label === '2025년 출제 · 9월 모평 · 공통 · 11번' && m.items[0].has && !m.items[1].has && m.items[2].label === '(Corpus 에 없음)', m);
+  ok('표가 틀리면 목록·그림 거부', S.kv_refMeta('nope', ['2025-09-C-11']).reason === 'expired' && S.kv_refImage('', '2025-09-C-11').reason === 'expired');
+  const im = S.kv_refImage(base.t, '2025-09-C-11');
+  ok('그림: Corpus 에 적힌 파일만', im.ok && im.mime === 'image/png' && im.base64 === 'BASE64' && !S.kv_refImage(base.t, '2024-06-P-27').ok && !S.kv_refImage(base.t, 'A'.repeat(30)).ok, im);
+  env.tick(13 * 3600 * 1000);
+  const b2 = S.kv_base_();
+  ok('표는 12시간 뒤 바뀌고 직전 표도 받는다', b2.t !== base.t && S.kv_refMeta(base.t, []).ok && S.kv_refMeta(b2.t, []).ok);
+  env.tick(25 * 3600 * 1000);
+  ok('오래된 표는 거부', S.kv_refMeta(base.t, []).reason === 'expired' && S.kv_refMeta(b2.t, []).reason === 'expired');
+  // 뷰어 쪽: [[사례]] 줄 → 링크
+  let why = '', good = true;
+  try {
+    const cell = '2025-09-C-11<br>[[ID]] K_1공통14#da56fd#1210b749<br>[[수정]] $x$ 의 값은? &lt;b&gt;<br>[[빈도]] 2024:1 2025:2<br>[[사례]] 2025-09-C-11 2025-09-C-15 2024-06-P-27 (외 3)<br>[[이유]] r<br><br>[[ID]] K_1공통22#7ba1ee#dbd3f72d<br>[[원본]] p';
+    const want = 'ids=2025-09-C.11.15~2024-06-P.27&';
+    for (const f of ['Sidebar.html', 'ArchiveViewer.html']) {
+      const html = fs.readFileSync(path.join(REPO, f), 'utf8');
+      const js = html.match(/<script>([\s\S]*?)<\/script>\s*<\/body>/)[1];
+      const sb = { document: { getElementById: () => ({ addEventListener() {}, style: {} }), querySelectorAll: () => [], addEventListener() {} }, google: { script: { run: new Proxy({}, { get: (t, k, r) => () => r }) } },
+                   setInterval: () => {}, setTimeout: () => {}, window: { addEventListener() {} }, console };
+      vm.createContext(sb);
+      try { vm.runInContext(js + '\nthis.refsLink = refsLink; this.setREFS = (x) => { REFS = x; };', sb); } catch (e) { if (!sb.refsLink) throw new Error(f + ': ' + e); }
+      const off = sb.refsLink(cell);
+      if (off.indexOf('[[사례]] 기출 3문항 (외 3)') < 0 || off.indexOf('<a ') >= 0) { good = false; why = f + ' off: ' + off; }
+      sb.setREFS({ url: 'https://script.test/exec', t: 'T1' });
+      const on = sb.refsLink(cell);
+      if (on.indexOf('href="https://script.test/exec?view=refs&t=T1&' + want) < 0 || on.indexOf('기출 3문항 보기</a> (외 3)') < 0 || on.indexOf(encodeURIComponent('$x$ 의 값은? <b>')) < 0 || on.indexOf('2025-09-C-15 2024') >= 0) { good = false; why = f + ' on: ' + on; }
+      if (sb.refsLink('[[ID]] a#b#c<br>[[원본]] p') !== '[[ID]] a#b#c<br>[[원본]] p') { good = false; why = f + ' none'; }
+    }
+    new vm.Script(fs.readFileSync(path.join(REPO, 'RefViewerPage.html'), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1].replace('<?!= boot ?>', '{"t":"","ids":[],"q":""}'));
+  } catch (e) { good = false; why = String(e); }
+  ok('사이드바·아카이브 뷰어: [[사례]] 줄을 링크로, 화면 스크립트 구문', good, why);
 }
 
 console.log(`\n결과: 통과 ${pass} / 실패 ${fail}`);

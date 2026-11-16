@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <style>
+      html, body { margin: 0; height: 100%; background: #1e1f22; color: #e8e8e8; font: 14px/1.4 -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+      #bar { position: fixed; top: 0; left: 0; right: 0; height: 44px; display: flex; align-items: center; gap: 14px; padding: 0 14px; background: #2b2d31; border-bottom: 1px solid #111; z-index: 2; }
+      #pos { font-weight: 700; font-size: 16px; min-width: 76px; }
+      #id { font-family: ui-monospace, Menlo, monospace; color: #9ecbff; }
+      #label { color: #cfcfcf; }
+      #q { margin-left: auto; color: #ffd479; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #help { color: #8a8a8a; font-size: 12px; white-space: nowrap; }
+      button { background: #3a3d44; color: #e8e8e8; border: 1px solid #555; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 14px; }
+      button:disabled { opacity: .35; cursor: default; }
+      #stage { position: absolute; top: 45px; bottom: 0; left: 0; right: 0; overflow: auto; text-align: center; padding: 14px; box-sizing: border-box; }
+      #stage img { max-width: min(100%, 1100px); background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,.6); }
+      #msg { margin-top: 80px; color: #aaa; font-size: 15px; }
+    </style>
+  </head>
+  <body>
+    <div id="bar">
+      <button id="prev" title="이전 (←)">◀</button>
+      <span id="pos">– / –</span>
+      <button id="next" title="다음 (→)">▶</button>
+      <span id="id"></span><span id="label"></span>
+      <span id="q"></span>
+      <span id="help">← → 넘기기 · Home/End 처음/끝 · ↑ ↓ 스크롤</span>
+    </div>
+    <div id="stage"><div id="msg">불러오는 중…</div></div>
+    <script>
+      var BOOT = <?!= boot ?>;
+      var items = [], at = 0, cache = {}, waiting = {};
+      var $ = function (id) { return document.getElementById(id); };
+
+      function say(t) { $('stage').innerHTML = '<div id="msg"></div>'; $('msg').textContent = t; }
+
+      function load(i, cb) {
+        var it = items[i];
+        if (!it) return;
+        if (cache[it.id]) { if (cb) cb(cache[it.id]); return; }
+        if (waiting[it.id]) { if (cb) waiting[it.id].push(cb); return; }
+        waiting[it.id] = cb ? [cb] : [];
+        var done = function (r) {
+          var v = (r && r.ok) ? { src: 'data:' + r.mime + ';base64,' + r.base64 } : { err: (r && r.reason) || '불러오지 못했습니다.' };
+          if (v.src) cache[it.id] = v;                       // 실패는 담아 두지 않는다 — 다시 오면 다시 시도
+          var q = waiting[it.id] || []; delete waiting[it.id];
+          q.forEach(function (f) { f(v); });
+        };
+        if (!it.has) { done({ ok: false, reason: '이 문항의 원본 이미지가 Corpus 에 없습니다.' }); return; }
+        google.script.run.withSuccessHandler(done).withFailureHandler(function (e) { done({ ok: false, reason: String((e && e.message) || e) }); }).kv_refImage(BOOT.t, it.id);
+      }
+
+      function show(i) {
+        if (!items.length) return;
+        at = Math.max(0, Math.min(items.length - 1, i));
+        var it = items[at];
+        $('pos').textContent = (at + 1) + ' / ' + items.length;
+        $('id').textContent = it.id; $('label').textContent = it.label;
+        $('prev').disabled = at === 0; $('next').disabled = at === items.length - 1;
+        document.title = '기출 사례 ' + (at + 1) + '/' + items.length + ' · ' + it.id;
+        if (!cache[it.id]) say('불러오는 중… ' + it.id);
+        load(at, function (v) {
+          if (items[at].id !== it.id) return;              // 그 사이에 넘겼다
+          if (v.err) { say(it.id + ' — ' + (v.err === 'expired' ? '링크가 만료되었습니다. 시트에서 「사례 보기」를 다시 눌러 주세요.' : v.err)); return; }
+          $('stage').innerHTML = ''; var img = new Image(); img.src = v.src; img.alt = it.id; $('stage').appendChild(img); $('stage').scrollTop = 0;
+        });
+        [at + 1, at + 2, at - 1].forEach(function (k) { if (k >= 0 && k < items.length) load(k); });      // 앞뒤를 미리 받는다
+      }
+
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowRight' || e.key === 'PageDown') { show(at + 1); e.preventDefault(); }
+        else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { show(at - 1); e.preventDefault(); }
+        else if (e.key === 'Home') { show(0); e.preventDefault(); }
+        else if (e.key === 'End') { show(items.length - 1); e.preventDefault(); }
+        else if (e.key === 'ArrowDown') { $('stage').scrollBy(0, 120); e.preventDefault(); }
+        else if (e.key === 'ArrowUp') { $('stage').scrollBy(0, -120); e.preventDefault(); }
+      });
+      $('prev').onclick = function () { show(at - 1); };
+      $('next').onclick = function () { show(at + 1); };
+
+      if (BOOT.q) $('q').textContent = '표현: ' + BOOT.q;
+      if (!BOOT.ids.length) say('볼 사례가 없습니다.');
+      else google.script.run
+        .withSuccessHandler(function (r) {
+          if (!r || !r.ok) { say((r && r.reason) === 'expired' ? '링크가 만료되었습니다. 시트에서 「사례 보기」를 다시 눌러 주세요.' : '목록을 불러오지 못했습니다: ' + ((r && r.reason) || '?')); return; }
+          // 최근 시험부터(문항ID 앞 7자 = 출제연도-월). 같은 시험 안에서는 받은 순서.
+          items = r.items.map(function (x, i) { x._i = i; return x; }).sort(function (a, b) { var p = a.id.slice(0, 7), q = b.id.slice(0, 7); return p < q ? 1 : p > q ? -1 : a._i - b._i; });
+          show(0); window.focus();
+        })
+        .withFailureHandler(function (e) { say('목록을 불러오지 못했습니다: ' + String((e && e.message) || e)); })
+        .kv_refMeta(BOOT.t, BOOT.ids);
+    </script>
+  </body>
+</html>

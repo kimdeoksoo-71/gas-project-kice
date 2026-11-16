@@ -25,10 +25,12 @@
  *   LEGACY_SS_ID      「기출과 윤문(2011~)」 — dsread src=legacy
  *   QV_LAYOUT_SWITCH_ROW_2  아카이브 뷰어의 두 번째 경계 행(전환 때 기록)
  *   GITHUB_TOKEN · GITHUB_REPO  프롬프트 push
+ *   KV_WEBAPP_URL     (선택) 「사례 보기」 링크에 쓸 웹앱 주소. 비우면 ScriptApp.getService().getUrl()
+ *   KV_TICKET         (자동) 사례 보기 화면의 표 — RefViewer.gs 가 12시간마다 바꾼다
  */
 
 const RAPI = {
-  VERSION:    'kice-2.0.2',
+  VERSION:    'kice-2.0.3',
   PROJECT:    'kice',
   TOKEN_PROP: 'REMOTE_TOKEN',
   LOG_TAIL:   20,
@@ -37,6 +39,7 @@ const RAPI = {
 
 function doGet(e) {
   const p = (e && e.parameter) || {};
+  if (p.view === 'refs') return kv_page_(p);            // 기출 사례 보기 화면 — REMOTE_TOKEN 이 아니라 표(ticket)로 연다 (RefViewer.gs)
   return rapi_handle_(p);
 }
 
