@@ -51,6 +51,13 @@
         background: #e0e0e0;
         margin: 20px 0;
       }
+      #ks { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
+      #ksQ { width: calc(100% - 78px); box-sizing: border-box; font-size: 13px; padding: 4px 6px; border: 1px solid #9ca3af; border-radius: 4px; }
+      #ks label { font-size: 11px; color: #555; margin-left: 4px; white-space: nowrap; }
+      #ksOut { font-size: 12px; margin-top: 4px; color: #444; }
+      #ksOut:empty { display: none; }
+      #ksOut a { font-weight: 600; }
+      #ksOut .yr { display: block; color: #777; font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
       .op { padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px dotted #ddd; }
       .op:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
       .fb { margin-top: 6px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
@@ -64,6 +71,11 @@
     </style>
   </head>
   <body>
+    <div id="ks">
+      <input id="ksQ" type="text" placeholder="기출 표현 검색 (Enter)">
+      <label title="2028 범위 안 문항만"><input id="ksScope" type="checkbox">범위 안</label>
+      <div id="ksOut"></div>
+    </div>
     <div id="meta">선택 범위 미리보기</div>
     <div id="container">
       <span id="loading">데이터를 불러오는 중...</span>
@@ -214,6 +226,29 @@
           .withSuccessHandler(renderRange)
           .getActiveRangeContents();
       }
+
+      // ── 기출 표현 검색: Corpus 에서 찾아 「기출 N문항 보기」 링크(사례 보기 화면)를 준다 (CorpusSearch.gs) ──
+      function ksHtml(r) {
+        if (!r || !r.ok) return esc((r && r.reason) || '검색하지 못했습니다.');
+        if (!r.total) return '「' + esc(r.q) + '」 — 기출에 없습니다.';
+        const text = `기출 ${r.shown}문항 보기`;
+        return `「${esc(r.q)}」 ${r.total}문항 (${r.hits}곳) · ` + (r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${text}</a>` : text)
+          + (r.total > r.shown ? ' (최근 것만)' : '') + `<span class="yr">${r.years.map(y => esc(y[0]) + ':' + y[1]).join('  ')}</span>`;
+      }
+      function ksGo() {
+        const q = document.getElementById('ksQ').value, out = document.getElementById('ksOut');
+        if (!q.trim()) { out.innerHTML = ''; return; }
+        out.textContent = '찾는 중…';
+        google.script.run
+          .withSuccessHandler(r => { out.innerHTML = ksHtml(r); })
+          .withFailureHandler(e => { out.textContent = '실패: ' + (e && e.message || e); })
+          .ks_searchLink(q, document.getElementById('ksScope').checked);
+      }
+      (function () {
+        const q = document.getElementById('ksQ'), sc = document.getElementById('ksScope');
+        if (q && q.addEventListener) q.addEventListener('keydown', e => { if (e.key === 'Enter') ksGo(); });
+        if (sc && sc.addEventListener) sc.addEventListener('change', ksGo);
+      })();
 
       // 초기 실행 및 주기적 갱신
       fetchData();

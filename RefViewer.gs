@@ -66,7 +66,7 @@ function kv_expand_(s) {
 
 function kv_page_(p) {
   if (!kv_ticketOk_(p.t)) {
-    return HtmlService.createHtmlOutput('<p style="font:15px sans-serif;margin:40px">링크가 만료되었습니다. 시트에서 사이드바(또는 아카이브 뷰어)를 다시 연 뒤 「사례 보기」를 눌러 주세요.</p>').setTitle('기출 사례');
+    return HtmlService.createHtmlOutput('<p style="font:15px sans-serif;margin:40px">링크가 만료되었습니다. 시트에서 사이드바(또는 아카이브 뷰어)를 다시 열거나 다시 검색한 뒤 링크를 눌러 주세요.</p>').setTitle('기출 사례');
   }
   var tpl = HtmlService.createTemplateFromFile('RefViewerPage');
   tpl.boot = JSON.stringify({ t: String(p.t), ids: kv_expand_(p.ids), q: String(p.q || '').slice(0, 200) }).replace(/</g, '\\u003c');

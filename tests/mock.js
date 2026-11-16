@@ -48,7 +48,7 @@ function makeEnv(repo) {
                    createTemplateFromFile: (f) => ({ evaluate() { return { _tpl: f, _boot: this.boot, setTitle() { return this; } }; } }) },
   };
   vm.createContext(sandbox);
-  ['kiceAuto.gs', 'kiceData.gs', 'batchKiceMulti.gs', 'RemoteApi.gs', 'ArchieveViewer.gs', 'mainmenu.gs', 'RefViewer.gs'].forEach(f => {
+  ['kiceAuto.gs', 'kiceData.gs', 'batchKiceMulti.gs', 'RemoteApi.gs', 'ArchieveViewer.gs', 'mainmenu.gs', 'RefViewer.gs', 'CorpusSearch.gs'].forEach(f => {
     let src = fs.readFileSync(path.join(repo, f), 'utf8').replace(/^const (RAPI|QV) =/m, 'var $1 =');
     vm.runInContext(src, sandbox, { filename: f });
   });

@@ -350,5 +350,35 @@ console.log('S23 기출 사례 보기 (RefViewer)');
   ok('사이드바·아카이브 뷰어: [[사례]] 줄을 링크로, 화면 스크립트 구문', good, why);
 }
 
+console.log('S25 기출 표현 검색 (CorpusSearch)');
+{ const { env } = fresh(1);
+  const S = env.sandbox, fs = require('fs'), vm = require('vm'), path = require('path');
+  env.books.main.sheets.Corpus = [['문항ID', '출제연도', '시험', '과목', '번호', '2028범위', 'LaTeX'],
+    ['2024-06-C-13', 2024, '6월 모평', '공통', 13, '범위 안', '13. 곡선 $y=f(x)$ 와 $x$ 축으로 둘러싸인\n부분의 넓이는? 둘러싸인 부분의 넓이'],
+    ['2025-09-C-11', 2025, '9월 모평', '공통', 11, '범위 안', '11. 두 곡선으로 둘러싸인 부분의  넓이를 구하시오.'],
+    ['2025-09-M-28', 2025, '9월 모평', '미적분', 28, '범위 밖', '28. 둘러싸인 부분의 넓이'],
+    ['2023-11-C-09', 2023, '수능', '공통', 9, '범위 안', '9. 둘러싸인 도형의 넓이']];
+  const r = S.ks_search('둘러싸인 부분의 넓이', {});
+  ok('공백을 무시하고 찾는다(줄바꿈·두 칸)', r.ok && r.total === 3 && r.hits === 4, r);
+  ok('최근 시험부터', r.items.map(x => x.id).join(',') === '2025-09-C-11,2025-09-M-28,2024-06-C-13', r.items.map(x => x.id));
+  ok('연도별 문항 수와 이름', JSON.stringify(r.years) === '[["2024",1],["2025",2]]' && r.items[0].label === '2025년 출제 · 9월 모평 · 공통 · 11번' && r.items[2].n === 2, r.years);
+  ok('앞뒤 글과 맞은 곳', r.items[0].hit === '둘러싸인 부분의 넓이' && r.items[0].pre === '11. 두 곡선으로 ' && r.items[0].post === '를 구하시오.' && r.items[2].hit === '둘러싸인 부분의 넓이', r.items[0]);
+  ok('범위 안만', S.ks_search('둘러싸인부분의넓이', { inScope: true }).total === 2);
+  ok('없는 표현 · 너무 짧은 표현', S.ks_search('없는 표현입니다', {}).total === 0 && S.ks_search(' 가 ', {}).ok === false);
+  const u = S.ks_refsUrl_(r.items.map(x => x.id), '둘러싸인 부분의 넓이');
+  ok('사례 보기 주소: 시험별로 묶는다', u.indexOf('https://script.test/exec?view=refs&t=') === 0 && u.indexOf('&ids=2025-09-C.11~2025-09-M.28~2024-06-C.13&q=') > 0 && S.ks_refsUrl_([], 'x') === '', u);
+  let good = true, why = '';
+  const L = S.ks_searchLink('둘러싸인 부분의 넓이', false);
+  ok('사이드바 검색: 문항 수·연도·링크', L.ok && L.total === 3 && L.shown === 3 && /view=refs/.test(L.url) && !('items' in L) && S.ks_searchLink('가', false).ok === false, L);
+  try {
+    const js = fs.readFileSync(path.join(REPO, 'Sidebar.html'), 'utf8').match(/<script>([\s\S]*?)<\/script>\s*<\/body>/)[1];
+    const sb = { document: { getElementById: () => ({}), querySelectorAll: () => [] }, google: { script: { run: new Proxy({}, { get: (t, k2, r2) => () => r2 }) } }, setInterval: () => {}, setTimeout: () => {}, window: {} };
+    vm.createContext(sb); vm.runInContext(js + '\nthis.ksHtml = ksHtml;', sb);
+    const h = sb.ksHtml(L), h0 = sb.ksHtml({ ok: true, q: '<x>', total: 0 }), h1 = sb.ksHtml({ ok: false, reason: '두 글자' });
+    if (h.indexOf('3문항 (4곳)') < 0 || h.indexOf('>기출 3문항 보기</a>') < 0 || h.indexOf('2024:1  2025:2') < 0 || h0.indexOf('&lt;x&gt;') < 0 || h0.indexOf('기출에 없습니다') < 0 || h1 !== '두 글자') { good = false; why = h + ' | ' + h0; }
+  } catch (e) { good = false; why = String(e); }
+  ok('사이드바 검색 칸 표시', good, why);
+}
+
 console.log(`\n결과: 통과 ${pass} / 실패 ${fail}`);
 process.exit(fail ? 1 : 0);
