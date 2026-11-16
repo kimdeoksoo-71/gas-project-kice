@@ -39,6 +39,20 @@ function kv_base_() {
   return { url: url, t: kv_ticket_() };
 }
 
+/**
+ * kvurl (GET, 토큰 필요) — 엔진이 시작할 때 자기가 부르는 웹앱 주소를 적어 준다.
+ * ScriptApp.getService().getUrl() 은 시트에 묶인 스크립트에서 실제 배포 주소와 다른 값을 줄 수 있다
+ * (2026-11-16: 그 주소로 연 「사례 보기」가 Drive 의 "파일을 열 수 없습니다"로 떨어졌다). 그래서 실제로 통하는 주소를 속성에 둔다.
+ */
+function kv_apiSetUrl_(p) {
+  var url = String((p && p.url) || '').trim();
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[-\w]+\/exec$/.test(url)) return { ok: false, reason: '웹앱 주소(…/macros/s/<배포ID>/exec)가 아닙니다.' };
+  var props = PropertiesService.getScriptProperties();
+  var changed = props.getProperty(KV.URL_PROP) !== url;
+  if (changed) props.setProperty(KV.URL_PROP, url);
+  return { ok: true, changed: changed };
+}
+
 /** `2025-09-C.11.15~2025-06-P.27` → ['2025-09-C-11', '2025-09-C-15', '2025-06-P-27'] (뷰어가 주소를 줄이려고 이렇게 묶는다) */
 function kv_expand_(s) {
   var out = [];

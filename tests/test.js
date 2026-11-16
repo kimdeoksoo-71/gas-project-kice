@@ -34,7 +34,7 @@ console.log('S1 인증·ping·tick(상태 없음)');
 { const { env, g } = fresh(3);
   ok('토큰 없으면 빈 응답', env.get({ cmd: 'ping' }) === null);
   ok('틀린 토큰 POST 빈 응답', env.post({ token: 'x', cmd: 'ping' }) === null);
-  ok('ping 버전', g({ cmd: 'ping' }).version === 'kice-2.0.3');
+  ok('ping 버전', g({ cmd: 'ping' }).version === 'kice-2.0.4');
   ok('tick 상태 없음 ok:false', g({ cmd: 'tick' }).ok === false);
   ok('claim 상태 없음 not_running', g({ cmd: 'claim' }).reason === 'not_running');
   ok('unknown cmd', g({ cmd: 'zz' }).ok === false);
@@ -290,6 +290,15 @@ console.log('S22 사이드바 Feedback 조회');
   ok('사이드바 스크립트 구문·의견별 버튼(ID 형식인 의견에만)', synOk, why);
 }
 
+console.log('S24 [분석 없음] 이 붙은 칸의 분류 (kice-2.0.4)');
+{ const { env } = fresh(1);
+  const c = env.sandbox.kice_classifyCell_;
+  ok('분석 없음 + 수정 구절 없음 → none', c('[분석 없음]<br>수정 구절 없음') === 'none' && c('[분석 없음]\n수정 구절 없음') === 'none');
+  ok('분석 없음 + 실패 → fail', c('[분석 없음]<br>(실패) max_tokens') === 'fail');
+  ok('분석 없음 + 의견 → edit', c('[분석 없음]<br>[[ID]] a#b#c<br>[[원본]] x') === 'edit' && c('[분석 없음]<br><br>[[ID]] a#b#c') === 'edit' && c('[분석 없음]') === 'edit');
+  ok('전과 같은 것', c('') === 'empty' && c('수정 구절 없음') === 'none' && c('합의 없음') === 'none' && c('범위 밖') === 'none' && c('(실패) x') === 'fail' && c('2024-09-C-13 | 원본link<br>[[ID]] a') === 'edit');
+}
+
 console.log('S23 기출 사례 보기 (RefViewer)');
 { const { env } = fresh(1);
   const S = env.sandbox, fs = require('fs'), vm = require('vm'), path = require('path');
@@ -308,6 +317,10 @@ console.log('S23 기출 사례 보기 (RefViewer)');
   ok('표가 틀리면 목록·그림 거부', S.kv_refMeta('nope', ['2025-09-C-11']).reason === 'expired' && S.kv_refImage('', '2025-09-C-11').reason === 'expired');
   const im = S.kv_refImage(base.t, '2025-09-C-11');
   ok('그림: Corpus 에 적힌 파일만', im.ok && im.mime === 'image/png' && im.base64 === 'BASE64' && !S.kv_refImage(base.t, '2024-06-P-27').ok && !S.kv_refImage(base.t, 'A'.repeat(30)).ok, im);
+  { const e2 = fresh(1); const real = 'https://script.google.com/macros/s/AKfy_cb-x1/exec';
+    ok('kvurl: 토큰이 있어야 하고 웹앱 주소만 받는다', e2.env.get({ cmd: 'kvurl', url: real }) === null && e2.g({ cmd: 'kvurl', url: 'https://evil.example/exec' }).ok === false);
+    const r1 = e2.g({ cmd: 'kvurl', url: real }), r2 = e2.g({ cmd: 'kvurl', url: real });
+    ok('kvurl: 적어 둔 주소가 getUrl 보다 먼저다', r1.ok && r1.changed && r2.ok && !r2.changed && e2.env.sandbox.kv_base_().url === real, [r1, r2]); }
   env.tick(13 * 3600 * 1000);
   const b2 = S.kv_base_();
   ok('표는 12시간 뒤 바뀌고 직전 표도 받는다', b2.t !== base.t && S.kv_refMeta(base.t, []).ok && S.kv_refMeta(b2.t, []).ok);

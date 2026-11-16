@@ -30,7 +30,7 @@
  */
 
 const RAPI = {
-  VERSION:    'kice-2.0.3',
+  VERSION:    'kice-2.0.4',
   PROJECT:    'kice',
   TOKEN_PROP: 'REMOTE_TOKEN',
   LOG_TAIL:   20,
@@ -82,6 +82,7 @@ function rapi_dispatch_(p) {
     case 'corpus':     return kdata_apiCorpus_(p);
     case 'prompts':    return kdata_apiPrompts_();
     case 'image':      return kdata_apiImage_(p);
+    case 'kvurl':      return kv_apiSetUrl_(p);          // 엔진이 자기가 쓰는 웹앱 주소를 알려 준다 — 「사례 보기」 링크의 바탕 (RefViewer.gs)
     // 코퍼스 빌더
     case 'dsread':     return kdata_apiDsread_(p);
     case 'corpus_put': return kdata_apiCorpusPut_(p);

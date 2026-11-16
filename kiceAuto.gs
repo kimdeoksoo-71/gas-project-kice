@@ -372,8 +372,14 @@ function kice_appendArchive_(sh, rows7) {
  * 결과 칸 분류 (v5 §8-4): empty / none(첫 줄이 '수정 구절 없음'·'합의 없음'·'범위 밖') / fail('(실패)'로 시작) / edit
  */
 function kice_classifyCell_(v) {
-  var first = kice_firstLine_(v);
-  if (!first) return kice_cell_(v).trim() ? 'edit' : 'empty';
+  var s = kice_cell_(v).trim();
+  if (!s) return 'empty';
+  // 엔진은 해설이 없어 분석을 건너뛴 문항의 E·G 첫 줄에 [분석 없음] 을 붙인다 — 분류는 그 다음 줄로 한다 (kice-2.0.4)
+  var lines = s.split(/\n|<br\s*\/?>/i).map(function (x) { return x.trim(); });
+  if (lines[0] === '[분석 없음]') lines.shift();
+  while (lines.length && !lines[0]) lines.shift();
+  var first = lines.length ? lines[0] : '';
+  if (!first) return 'edit';
   if (KICE_NONE_LINES.indexOf(first) >= 0) return 'none';
   if (first.indexOf('(실패)') === 0) return 'fail';
   return 'edit';
